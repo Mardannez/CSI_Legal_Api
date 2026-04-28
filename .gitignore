@@ -1,0 +1,16 @@
+# Dependencias
+node_modules/
+
+# Variables de entorno (claves API, credenciales base de datos)
+.env
+
+# Logs
+*.log
+npm-debug.log*
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# Cobertura de tests
+coverage/

@@ -1,0 +1,1976 @@
+import { Router } from "express";
+import { supabase } from "../lib/supabase.js";
+import { requireAuth } from "../middlewares/auth.middleware.js";
+import { authorizeEmpresaAccess } from "../middlewares/authorizeEmpresaAcces.middleware.js";
+import multer from 'multer';
+
+
+
+const router = Router();
+
+function toInt(v) {
+  if (v === undefined || v === null || v === "") return null;
+  const n = Number(v);
+  return Number.isInteger(n) ? n : null;
+}
+
+/* Helpers para subir archivos y documentos */
+const uploadEvidence = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10 MB por archivo
+    files: 10,
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedMimeTypes = [
+      "application/pdf",
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "image/jpeg",
+      "image/png",
+    ];
+
+    const fileName = file.originalname.toLowerCase();
+    const allowedExtensions = [".pdf", ".doc", ".docx", ".jpg", ".jpeg", ".png"];
+    const hasValidExtension = allowedExtensions.some((ext) =>
+      fileName.endsWith(ext)
+    );
+
+    if (!allowedMimeTypes.includes(file.mimetype) && !hasValidExtension) {
+      return cb(
+        new Error("Solo se permiten archivos PDF, DOC, DOCX, JPG o PNG")
+      );
+    }
+
+    cb(null, true);
+  },
+});
+
+function bufferToPostgresByteaHex(buffer) {
+  return `\\x${buffer.toString("hex")}`;
+}
+
+function postgresByteaToBuffer(value) {
+  if (!value) return Buffer.alloc(0);
+
+  if (Buffer.isBuffer(value)) return value;
+
+  if (typeof value === "string") {
+    if (value.startsWith("\\x")) {
+      return Buffer.from(value.slice(2), "hex");
+    }
+
+    if (value.startsWith("\\\\x")) {
+      return Buffer.from(value.slice(3), "hex");
+    }
+
+    return Buffer.from(value, "base64");
+  }
+
+  throw new Error("Formato bytea no soportado");
+}
+
+function guessFileTypeFromBuffer(buffer) {
+  if (!buffer || buffer.length < 4) {
+    return {
+      mime: "application/octet-stream",
+      extension: "bin",
+    };
+  }
+
+  // PDF
+  if (
+    buffer[0] === 0x25 &&
+    buffer[1] === 0x50 &&
+    buffer[2] === 0x44 &&
+    buffer[3] === 0x46
+  ) {
+    return {
+      mime: "application/pdf",
+      extension: "pdf",
+    };
+  }
+
+  // PNG
+  if (
+    buffer[0] === 0x89 &&
+    buffer[1] === 0x50 &&
+    buffer[2] === 0x4e &&
+    buffer[3] === 0x47
+  ) {
+    return {
+      mime: "image/png",
+      extension: "png",
+    };
+  }
+
+  // JPG
+  if (
+    buffer[0] === 0xff &&
+    buffer[1] === 0xd8 &&
+    buffer[2] === 0xff
+  ) {
+    return {
+      mime: "image/jpeg",
+      extension: "jpg",
+    };
+  }
+
+  // DOCX (zip)
+  if (
+    buffer[0] === 0x50 &&
+    buffer[1] === 0x4b &&
+    buffer[2] === 0x03 &&
+    buffer[3] === 0x04
+  ) {
+    return {
+      mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      extension: "docx",
+    };
+  }
+
+  // DOC clásico
+  if (
+    buffer[0] === 0xd0 &&
+    buffer[1] === 0xcf &&
+    buffer[2] === 0x11 &&
+    buffer[3] === 0xe0
+  ) {
+    return {
+      mime: "application/msword",
+      extension: "doc",
+    };
+  }
+
+  return {
+    mime: "application/octet-stream",
+    extension: "bin",
+  };
+}
+
+function getExtensionFromFileName(fileName = "") {
+  const match = fileName.match(/\.([a-zA-Z0-9]+)$/);
+  return match ? match[1].toLowerCase() : "";
+}
+
+function sanitizeFileName(fileName = "") {
+  return fileName
+    .replace(/[^\w\s.-]/g, "_")
+    .replace(/\s+/g, "_")
+    .trim();
+}
+
+async function resolveCompanyIdByEvidenceId(evidenceId) {
+  const { data: evidence, error: evidenceError } = await supabase
+    .from("Evidencias")
+    .select("id, IdEvaluacionDetalle")
+    .eq("id", evidenceId)
+    .maybeSingle();
+
+  if (evidenceError) throw evidenceError;
+  if (!evidence) return null;
+
+  return resolveCompanyIdByDetalleId(Number(evidence.IdEvaluacionDetalle));
+}
+
+/* Fin Helpers para subir archivos y documentos */
+
+function getEvaluacionId(row) {
+  return Number(row?.id ?? row?.IdEvaluacionEncabezado) || null;
+}
+
+async function resolveCompanyIdByDetalleId(detalleId) {
+  const { data: detalle, error: detErr } = await supabase
+    .from("EvaluacionDetalle")
+    .select('id, "IdEvaluacionEncabezado"')
+    .eq("id", detalleId)
+    .maybeSingle();
+
+  if (detErr) throw detErr;
+  if (!detalle) return null;
+
+  const evaluacionId = getEvaluacionId({
+    id: detalle.IdEvaluacionEncabezado,
+  });
+
+  if (!evaluacionId) return null;
+
+  const { data: encabezado, error: encErr } = await supabase
+    .from("EvaluacionEncabezado")
+    .select('id, "IdEmpresa"')
+    .eq("id", evaluacionId)
+    .maybeSingle();
+
+  if (encErr) throw encErr;
+  if (!encabezado) return null;
+
+  return Number(encabezado.IdEmpresa) || null;
+}
+
+/*################ Helper para agregar eventos ################### */
+const TABLA_EVENTOS = "Eventos"; 
+async function resolveCompanyIdByEventoId(eventoId) {
+  const { data: evento, error: eventoError } = await supabase
+    .from("TABLA_EVENTOS")
+    .select("id, IdEvaluacionDetalle")
+    .eq("id", eventoId)
+    .maybeSingle();
+
+  if (eventoError) throw eventoError;
+  if (!evento) return null;
+
+  return resolveCompanyIdByDetalleId(Number(evento.IdEvaluacionDetalle));
+}
+
+/*############### Helpers para agregar responsables *#####################*/
+
+const TABLA_RESPONSABLES = "Responsables";
+const TABLA_REQUISITO_RESPONSABLES = "RequisitoResponsables"; 
+
+
+async function resolveCompanyIdByRequisitoResponsableId(relacionId) {
+  const { data: relacion, error: relacionError } = await supabase
+    .from(TABLA_REQUISITO_RESPONSABLES)
+    .select("id, IdEvaluacionDetalle")
+    .eq("id", relacionId)
+    .maybeSingle();
+
+  if (relacionError) throw relacionError;
+  if (!relacion) return null;
+
+  return resolveCompanyIdByDetalleId(Number(relacion.IdEvaluacionDetalle));
+}
+
+async function resolveEmpresaIdFromDetalleId(detalleId) {
+  const empresaId = await resolveCompanyIdByDetalleId(detalleId);
+
+  if (!empresaId || !Number.isInteger(Number(empresaId))) {
+    return null;
+  }
+
+  return Number(empresaId);
+}
+
+/**
+ * GET /api/evaluaciones/actual?companyId=1
+ * Devuelve la evaluación más reciente de la empresa o null
+ */
+router.get("/actual",requireAuth,authorizeEmpresaAccess({requiredPermissions: ["EVALUACIONES_VER"], resolveEmpresaId: async (req) => toInt(req.query.companyId),}), async (req, res) => {
+    try {
+      const companyId = toInt(req.query.companyId);
+
+      if (!companyId || companyId <= 0) {
+        return res.status(400).json({
+          message: "companyId debe ser un entero positivo",
+        });
+      }
+
+      const { data, error } = await supabase
+        .from("EvaluacionEncabezado")
+        .select("*")
+        .eq("IdEmpresa", companyId)
+        .order("FechaRegistro", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) {
+        console.error("GET /evaluaciones/actual error:", error);
+        return res.status(500).json({
+          message: "Error consultando evaluación",
+          detail: error.message,
+        });
+      }
+
+      return res.json({ Evaluacion: data ?? null });
+    } catch (err) {
+      console.error("GET /evaluaciones/actual catch:", err);
+      return res.status(500).json({ message: "Error interno" });
+    }
+  }
+);
+
+/**
+ * POST /api/evaluaciones/iniciar
+ * body:
+ * {
+ *   companyId: 1,
+ *   mode: "all" | "selected",
+ *   requisitosIds?: number[]
+ * }
+ */
+router.post(
+  "/iniciar",
+  requireAuth,
+  authorizeEmpresaAccess({
+    requiredPermissions: ["EVALUACIONES_EDITAR"],
+    resolveEmpresaId: async (req) => toInt(req.body?.companyId),
+  }),
+  async (req, res) => {
+    try {
+      const { companyId, mode, requisitosIds } = req.body || {};
+
+      const cId = toInt(companyId);
+      if (!cId || cId <= 0) {
+        return res.status(400).json({ message: "companyId inválido" });
+      }
+
+      const m = mode || "all";
+      if (!["all", "selected"].includes(m)) {
+        return res.status(400).json({
+          message: "mode debe ser 'all' o 'selected'",
+        });
+      }
+
+      const userId = toInt(req.user?.id);
+      if (!userId || userId <= 0) {
+        return res.status(401).json({
+          message: "Token inválido: user id no encontrado",
+        });
+      }
+
+      const { data: activa, error: actErr } = await supabase
+        .from("EvaluacionEncabezado")
+        .select("*")
+        .eq("IdEmpresa", cId)
+        .eq("Estado", 1)
+        .order("FechaRegistro", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (actErr) {
+        console.error("Check activa error:", actErr);
+        return res.status(500).json({
+          message: "Error validando evaluación activa",
+          detail: actErr.message,
+        });
+      }
+
+      if (activa) {
+        return res.status(409).json({
+          message: "Ya existe una evaluación activa para esta empresa",
+          Evaluacion: activa,
+        });
+      }
+
+      let reqList = [];
+
+      if (m === "selected") {
+        if (!Array.isArray(requisitosIds) || requisitosIds.length === 0) {
+          return res.status(400).json({
+            message: "requisitosIds es requerido en modo 'selected'",
+          });
+        }
+
+        const ids = requisitosIds
+          .map((x) => toInt(x))
+          .filter((n) => n && n > 0);
+
+        if (ids.length === 0) {
+          return res.status(400).json({ message: "requisitosIds inválidos" });
+        }
+
+        const { data: requisitos, error: reqErr } = await supabase
+          .from("Requisito")
+          .select("id, IdPeriocidad")
+          .in("id", ids);
+
+        if (reqErr) {
+          console.error("Requisitos selected error:", reqErr);
+          return res.status(500).json({
+            message: "Error consultando requisitos seleccionados",
+            detail: reqErr.message,
+          });
+        }
+
+        reqList = requisitos || [];
+
+        if (reqList.length !== ids.length) {
+          const found = new Set(reqList.map((r) => r.id));
+          const missing = ids.filter((id) => !found.has(id));
+
+          return res.status(400).json({
+            message: "Uno o más requisitos no existen",
+            missingIds: missing,
+          });
+        }
+      } else {
+        const { data: requisitos, error: reqErr } = await supabase
+          .from("Requisito")
+          .select("id, IdPeriocidad")
+          .order("id", { ascending: true });
+
+        if (reqErr) {
+          console.error("Requisitos all error:", reqErr);
+          return res.status(500).json({
+            message: "Error consultando requisitos",
+            detail: reqErr.message,
+          });
+        }
+
+        reqList = requisitos || [];
+
+        if (reqList.length === 0) {
+          return res.status(400).json({
+            message: "No hay requisitos para iniciar evaluación",
+          });
+        }
+      }
+
+      let estadoInicialId = 5;
+
+      const { data: estadoRow, error: estErr } = await supabase
+        .from("EstadoRequisito")
+        .select("id")
+        .eq("Estado", "No ha sucedido")
+        .maybeSingle();
+
+      if (estErr) {
+        console.error("EstadoRequisito lookup error:", estErr);
+        return res.status(500).json({
+          message: "Error consultando EstadoRequisito",
+          detail: estErr.message,
+        });
+      }
+
+      if (estadoRow?.id) estadoInicialId = estadoRow.id;
+
+      const now = new Date().toISOString();
+
+      const { data: header, error: headerError } = await supabase
+        .from("EvaluacionEncabezado")
+        .insert({
+          IdEmpresa: cId,
+          FechaRegistro: now,
+          UltimaVerificacion: null,
+          UltimoHistorico: null,
+          ProximoEvento: null,
+          IdUsuarioRegistro: userId,
+          Estado: 1,
+        })
+        .select("*")
+        .single();
+
+      if (headerError) {
+        console.error("Insert encabezado error:", headerError);
+        return res.status(500).json({
+          message: "Error creando encabezado",
+          detail: headerError.message,
+        });
+      }
+
+      const headerId = getEvaluacionId(header);
+
+      if (!headerId) {
+        return res.status(500).json({
+          message: "No se pudo determinar el id de la evaluación creada",
+        });
+      }
+
+      const detalles = reqList.map((r) => ({
+        FechaRegistro: now,
+        IdEvaluacionEncabezado: headerId,
+        IdRequisito: r.id,
+        IdEstadoRequisito: estadoInicialId,
+        IdPeriocidad: r.IdPeriocidad ?? null,
+      }));
+
+      const { error: detError } = await supabase
+        .from("EvaluacionDetalle")
+        .insert(detalles);
+
+      if (detError) {
+        console.error("Insert detalle error:", detError);
+
+        await supabase
+          .from("EvaluacionDetalle")
+          .delete()
+          .eq("IdEvaluacionEncabezado", headerId);
+
+        await supabase
+          .from("EvaluacionEncabezado")
+          .delete()
+          .eq("id", headerId);
+
+        return res.status(500).json({
+          message: "Error creando detalle",
+          detail: detError.message,
+          debug: {
+            ejemploFila: detalles[0],
+            totalFilas: detalles.length,
+            estadoInicialId,
+          },
+        });
+      }
+
+      return res.status(201).json({
+        message: "Evaluación iniciada",
+        Evaluacion: header,
+        RequisitosAsignados: detalles.length,
+        EstadoInicial: { id: estadoInicialId, nombre: "No ha sucedido" },
+      });
+    } catch (err) {
+      console.error("POST /evaluaciones/iniciar catch:", err);
+      return res.status(500).json({
+        message: "Error interno",
+        detail: String(err),
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/evaluaciones/dashboard?companyId=1
+ */
+router.get(
+  "/dashboard",
+  requireAuth,
+  authorizeEmpresaAccess({
+    requiredPermissions: ["EVALUACIONES_VER"],
+    resolveEmpresaId: async (req) => toInt(req.query.companyId),
+  }),
+  async (req, res) => {
+    const requestId = `dash-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+    try {
+      console.log(`[${requestId}] GET /api/evaluaciones/dashboard START`);
+      console.log(`[${requestId}] query=`, req.query);
+      console.log(`[${requestId}] user(id)=`, req.user?.id);
+
+      const companyId = Number(req.query.companyId);
+      if (!Number.isInteger(companyId) || companyId <= 0) {
+        console.log(`[${requestId}] BAD companyId=`, req.query.companyId);
+        return res.status(400).json({
+          message: "companyId debe ser un entero positivo",
+        });
+      }
+
+      let { data: evalHeader, error: headerErr } = await supabase
+        .from("EvaluacionEncabezado")
+        .select("*")
+        .eq("IdEmpresa", companyId)
+        .eq("Estado", 1)
+        .order("FechaRegistro", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (headerErr) {
+        console.error(
+          `[${requestId}] ERROR EvaluacionEncabezado active`,
+          headerErr
+        );
+        return res.status(500).json({
+          message: "Error consultando EvaluacionEncabezado (active)",
+          detail: headerErr.message,
+        });
+      }
+
+      if (!evalHeader) {
+        const alt = await supabase
+          .from("EvaluacionEncabezado")
+          .select("*")
+          .eq("IdEmpresa", companyId)
+          .order("FechaRegistro", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (alt.error) {
+          console.error(
+            `[${requestId}] ERROR EvaluacionEncabezado latest`,
+            alt.error
+          );
+          return res.status(500).json({
+            message: "Error consultando EvaluacionEncabezado (latest)",
+            detail: alt.error.message,
+          });
+        }
+
+        evalHeader = alt.data || null;
+      }
+
+      if (!evalHeader) {
+        return res.json({
+          hasEvaluation: false,
+          Evaluacion: null,
+          Chart: [],
+          Items: [],
+          Totals: { total: 0 },
+        });
+      }
+
+      const evaluacionId = getEvaluacionId(evalHeader);
+
+      if (!evaluacionId) {
+        return res.status(500).json({
+          message: "No se pudo determinar el id de la evaluación",
+        });
+      }
+
+      const { data: detalles, error: detErr } = await supabase
+        .from("EvaluacionDetalle")
+        .select(
+          'id, "FechaRegistro", "IdEvaluacionEncabezado", "IdRequisito", "IdEstadoRequisito", "IdPeriocidad"'
+        )
+        .eq("IdEvaluacionEncabezado", evaluacionId);
+
+      if (detErr) {
+        console.error(`[${requestId}] ERROR EvaluacionDetalle`, detErr);
+        return res.status(500).json({
+          message: "Error consultando EvaluacionDetalle",
+          detail: detErr.message,
+        });
+      }
+
+      const detallesSafe = detalles || [];
+      const reqIds = [
+        ...new Set(detallesSafe.map((d) => d.IdRequisito).filter(Boolean)),
+      ];
+
+      const { data: requisitos, error: reqErr } = await supabase
+        .from("vw_RequisitoListado")
+        .select(
+          'id, "Titulo", "DescripcionRequisito", "ResponsableEjecucion", "IdPais", "IdSubCategoria", "IdPeriocidad"'
+        )
+        .in("id", reqIds.length ? reqIds : [0]);
+
+      if (reqErr) {
+        console.error(`[${requestId}] ERROR Requisito`, reqErr);
+        return res.status(500).json({
+          message: "Error consultando Requisito",
+          detail: reqErr.message,
+        });
+      }
+
+      const { data: estados, error: estErr } = await supabase
+        .from("EstadoRequisito")
+        .select('id, "Estado"')
+        .order("id", { ascending: true });
+
+      if (estErr) {
+        console.error(`[${requestId}] ERROR EstadoRequisito`, estErr);
+        return res.status(500).json({
+          message: "Error consultando EstadoRequisito",
+          detail: estErr.message,
+        });
+      }
+
+      const reqMap = new Map((requisitos || []).map((r) => [r.id, r]));
+      const estadoMap = new Map((estados || []).map((e) => [e.id, e.Estado]));
+
+      const items = detallesSafe.map((d) => {
+        const r = reqMap.get(d.IdRequisito);
+        const estadoNombre = estadoMap.get(d.IdEstadoRequisito) || "Desconocido";
+
+        return {
+          id: d.id,
+          evaluacionId: d.IdEvaluacionEncabezado,
+          requisitoId: d.IdRequisito,
+          name: r?.Titulo || `Requisito #${d.IdRequisito}`,
+          description: r?.DescripcionRequisito || "",
+          estadoId: d.IdEstadoRequisito,
+          status: estadoNombre,
+          responsible: r?.ResponsableEjecucion
+            ? `Responsable #${r.ResponsableEjecucion}`
+            : "—",
+          periodicity: d.IdPeriocidad ? `Periodicidad #${d.IdPeriocidad}` : "—",
+          lastUpdate: d.FechaRegistro,
+        };
+      });
+
+      const total = detallesSafe.length;
+      const countsByEstadoId = new Map();
+
+      for (const d of detallesSafe) {
+        countsByEstadoId.set(
+          d.IdEstadoRequisito,
+          (countsByEstadoId.get(d.IdEstadoRequisito) || 0) + 1
+        );
+      }
+
+      const chart = (estados || []).map((e) => ({
+        id: e.id,
+        name: e.Estado,
+        value: countsByEstadoId.get(e.id) || 0,
+      }));
+
+      return res.json({
+        hasEvaluation: true,
+        Evaluacion: evalHeader,
+        Chart: chart,
+        Items: items,
+        Totals: { total },
+        Debug: { requestId },
+      });
+    } catch (err) {
+      console.error(`[${requestId}] CATCH /dashboard`, err);
+      return res.status(500).json({
+        message: "Error interno",
+        detail: String(err),
+        Debug: { requestId },
+      });
+    }
+  }
+);
+
+/**
+ * PUT /api/evaluaciones/detalle/:detalleId/estado
+ */
+router.put(
+  "/detalle/:detalleId/estado",
+  requireAuth,
+  authorizeEmpresaAccess({
+    requiredPermissions: ["REQUISITOS_ESTADO_EDITAR"],
+    resolveEmpresaId: async (req) => {
+      const detalleId = toInt(req.params.detalleId);
+      if (!detalleId || detalleId <= 0) return null;
+      return resolveCompanyIdByDetalleId(detalleId);
+    },
+  }),
+  async (req, res) => {
+    try {
+      const detalleId = Number(req.params.detalleId);
+      const { estadoId } = req.body || {};
+      const newEstadoId = Number(estadoId);
+
+      if (!Number.isInteger(detalleId) || detalleId <= 0) {
+        return res.status(400).json({ message: "detalleId inválido" });
+      }
+
+      if (!Number.isInteger(newEstadoId) || newEstadoId <= 0) {
+        return res.status(400).json({ message: "estadoId inválido" });
+      }
+
+      const { data: estadoRow, error: estErr } = await supabase
+        .from("EstadoRequisito")
+        .select('id, "Estado"')
+        .eq("id", newEstadoId)
+        .maybeSingle();
+
+      if (estErr) {
+        return res.status(500).json({
+          message: "Error consultando EstadoRequisito",
+          detail: estErr.message,
+        });
+      }
+
+      if (!estadoRow) {
+        return res.status(404).json({
+          message: "EstadoRequisito no existe",
+        });
+      }
+
+      const { data: detalle, error: detErr } = await supabase
+        .from("EvaluacionDetalle")
+        .select('id, "IdEvaluacionEncabezado", "IdEstadoRequisito"')
+        .eq("id", detalleId)
+        .maybeSingle();
+
+      if (detErr) {
+        return res.status(500).json({
+          message: "Error consultando EvaluacionDetalle",
+          detail: detErr.message,
+        });
+      }
+
+      if (!detalle) {
+        return res.status(404).json({
+          message: "EvaluacionDetalle no existe",
+        });
+      }
+
+      const { data: encabezado, error: encErr } = await supabase
+        .from("EvaluacionEncabezado")
+        .select('id, "Estado"')
+        .eq("id", detalle.IdEvaluacionEncabezado)
+        .maybeSingle();
+
+      if (encErr) {
+        return res.status(500).json({
+          message: "Error consultando EvaluacionEncabezado",
+          detail: encErr.message,
+        });
+      }
+
+      if (!encabezado) {
+        return res.status(404).json({
+          message: "EvaluacionEncabezado no existe para este detalle",
+        });
+      }
+
+      if (encabezado.Estado !== 1) {
+        return res.status(409).json({
+          message: "La evaluación no está activa (Estado != 1)",
+        });
+      }
+
+      const { data: updated, error: updErr } = await supabase
+        .from("EvaluacionDetalle")
+        .update({ IdEstadoRequisito: newEstadoId })
+        .eq("id", detalleId)
+        .select('id, "IdEstadoRequisito"')
+        .single();
+
+      if (updErr) {
+        return res.status(500).json({
+          message: "Error actualizando estado",
+          detail: updErr.message,
+        });
+      }
+
+      return res.json({
+        message: "Estado actualizado",
+        Detalle: updated,
+        Estado: estadoRow,
+      });
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ message: "Error interno" });
+    }
+  }
+);
+
+/* #################### Subir evidencias a una evaluacion de una empresa ######################### */
+
+router.get(
+  "/detalle/:detalleId/evidencias",
+  requireAuth,
+  authorizeEmpresaAccess({
+    requiredPermissions: ["EVALUACIONES_VER"],
+    resolveEmpresaId: async (req) => {
+      const detalleId = toInt(req.params.detalleId);
+      if (!detalleId || detalleId <= 0) return null;
+      return resolveCompanyIdByDetalleId(detalleId);
+    },
+  }),
+  async (req, res) => {
+    try {
+      const detalleId = toInt(req.params.detalleId);
+
+      if (!detalleId || detalleId <= 0) {
+        return res.status(400).json({
+          message: "detalleId inválido",
+        });
+      }
+
+      const { data, error } = await supabase
+        .from("Evidencias")
+        .select(
+          "id, IdEvaluacionDetalle, Nombre, Descripcion, FechaRegistro, NombreArchivoOriginal, TipoMime"
+        )
+        .eq("IdEvaluacionDetalle", detalleId)
+        .order("FechaRegistro", { ascending: false });
+
+      if (error) {
+        return res.status(500).json({
+          message: "Error consultando evidencias",
+          detail: error.message,
+        });
+      }
+
+      return res.json({
+        Evidencias: data || [],
+      });
+    } catch (error) {
+      console.error("GET /detalle/:detalleId/evidencias error:", error);
+
+      return res.status(500).json({
+        message: "Error interno consultando evidencias",
+        detail: error.message,
+      });
+    }
+  }
+);
+
+router.post(
+  "/detalle/:detalleId/evidencias",
+  requireAuth,
+  authorizeEmpresaAccess({
+    requiredPermissions: ["EVALUACIONES_EDITAR"],
+    resolveEmpresaId: async (req) => {
+      const detalleId = toInt(req.params.detalleId);
+      if (!detalleId || detalleId <= 0) return null;
+      return resolveCompanyIdByDetalleId(detalleId);
+    },
+  }),
+  uploadEvidence.array("documentos", 10),
+  async (req, res) => {
+    try {
+      const detalleId = toInt(req.params.detalleId);
+      const nombre = (req.body?.nombre || "").toString().trim();
+      const descripcion = (req.body?.descripcion || "").toString().trim();
+      const fechaRegistro = (req.body?.fechaRegistro || "").toString().trim();
+
+      const files = req.files || [];
+
+      if (!detalleId || detalleId <= 0) {
+        return res.status(400).json({
+          message: "detalleId inválido",
+        });
+      }
+
+      if (!nombre) {
+        return res.status(400).json({
+          message: "nombre es requerido",
+        });
+      }
+
+      if (!fechaRegistro) {
+        return res.status(400).json({
+          message: "fechaRegistro es requerido",
+        });
+      }
+
+      if (!Array.isArray(files) || files.length === 0) {
+        return res.status(400).json({
+          message: 'Debe adjuntar al menos un archivo en el campo "documentos"',
+        });
+      }
+
+      const { data: detalle, error: detalleError } = await supabase
+        .from("EvaluacionDetalle")
+        .select("id")
+        .eq("id", detalleId)
+        .maybeSingle();
+
+      if (detalleError) {
+        return res.status(500).json({
+          message: "Error validando el detalle de evaluación",
+          detail: detalleError.message,
+        });
+      }
+
+      if (!detalle) {
+        return res.status(404).json({
+          message: "EvaluacionDetalle no encontrado",
+        });
+      }
+
+      const fechaIso = new Date(`${fechaRegistro}T00:00:00`).toISOString();
+
+      const payload = files.map((file, index) => {
+        const finalNombre =
+          files.length === 1
+            ? nombre
+            : `${nombre} - ${file.originalname || `archivo_${index + 1}`}`;
+
+        return {
+          IdEvaluacionDetalle: detalleId,
+          Nombre: finalNombre,
+          Descripcion: descripcion || null,
+          FechaRegistro: fechaIso,
+          Documento: bufferToPostgresByteaHex(file.buffer),
+          NombreArchivoOriginal: file.originalname || null,
+          TipoMime: file.mimetype || null,
+        };
+      });
+
+      const { data, error } = await supabase
+        .from("Evidencias")
+        .insert(payload)
+        .select(
+          "id, IdEvaluacionDetalle, Nombre, Descripcion, FechaRegistro, NombreArchivoOriginal, TipoMime"
+        );
+
+      if (error) {
+        return res.status(500).json({
+          message: "Error guardando evidencia(s)",
+          detail: error.message,
+        });
+      }
+
+      return res.status(201).json({
+        message: "Evidencia(s) cargada(s) correctamente",
+        Evidencias: data || [],
+      });
+    } catch (error) {
+      console.error("POST /detalle/:detalleId/evidencias error:", error);
+
+      if (
+        error?.message ===
+        "Solo se permiten archivos PDF, DOC, DOCX, JPG o PNG"
+      ) {
+        return res.status(400).json({
+          message: error.message,
+        });
+      }
+
+      return res.status(500).json({
+        message: "Error interno cargando evidencia(s)",
+        detail: error.message,
+      });
+    }
+  }
+);
+
+router.get(
+  "/evidencias/:id/download",
+  requireAuth,
+  authorizeEmpresaAccess({
+    requiredPermissions: ["EVALUACIONES_VER"],
+    resolveEmpresaId: async (req) => {
+      const evidenceId = toInt(req.params.id);
+      if (!evidenceId || evidenceId <= 0) return null;
+      return resolveCompanyIdByEvidenceId(evidenceId);
+    },
+  }),
+  async (req, res) => {
+    try {
+      const id = toInt(req.params.id);
+
+      if (!id || id <= 0) {
+        return res.status(400).json({
+          message: "id inválido",
+        });
+      }
+
+      const { data: evidencia, error } = await supabase
+        .from("Evidencias")
+        .select("id, Nombre, Documento, NombreArchivoOriginal, TipoMime")
+        .eq("id", id)
+        .maybeSingle();
+
+      if (error) {
+        return res.status(500).json({
+          message: "Error consultando evidencia",
+          detail: error.message,
+        });
+      }
+
+      if (!evidencia) {
+        return res.status(404).json({
+          message: "Evidencia no encontrada",
+        });
+      }
+
+      const fileBuffer = postgresByteaToBuffer(evidencia.Documento);
+
+      // 1. Tomamos MIME real si existe; si no, lo inferimos del binario
+      const guessed = guessFileTypeFromBuffer(fileBuffer);
+      const mime = evidencia.TipoMime || guessed.mime;
+
+      // 2. Tomamos nombre original si existe
+      const originalName = evidencia.NombreArchivoOriginal
+        ? sanitizeFileName(evidencia.NombreArchivoOriginal)
+        : "";
+
+      // 3. Si no hay nombre original, construimos uno con extensión real
+      const ext =
+        getExtensionFromFileName(originalName) ||
+        guessed.extension ||
+        "bin";
+
+      const fallbackBaseName = sanitizeFileName(evidencia.Nombre || "evidencia");
+      const finalFileName =
+        originalName || `${fallbackBaseName}.${ext}`;
+
+      res.setHeader("Content-Type", mime);
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${finalFileName}"`
+      );
+
+      return res.send(fileBuffer);
+    } catch (error) {
+      console.error("GET /evidencias/:id/download error:", error);
+
+      return res.status(500).json({
+        message: "Error interno descargando evidencia",
+        detail: error.message,
+      });
+    }
+  }
+);
+
+
+router.delete(
+  "/evidencias/:id",
+  requireAuth,
+  authorizeEmpresaAccess({
+    requiredPermissions: ["EVALUACIONES_EDITAR"],
+    resolveEmpresaId: async (req) => {
+      const evidenceId = toInt(req.params.id);
+      if (!evidenceId || evidenceId <= 0) return null;
+      return resolveCompanyIdByEvidenceId(evidenceId);
+    },
+  }),
+  async (req, res) => {
+    try {
+      const id = toInt(req.params.id);
+
+      if (!id || id <= 0) {
+        return res.status(400).json({
+          message: "id inválido",
+        });
+      }
+
+      const { data, error } = await supabase
+        .from("Evidencias")
+        .delete()
+        .eq("id", id)
+        .select("id, Nombre, NombreArchivoOriginal")
+        .maybeSingle();
+
+      if (error) {
+        return res.status(500).json({
+          message: "Error eliminando evidencia",
+          detail: error.message,
+        });
+      }
+
+      if (!data) {
+        return res.status(404).json({
+          message: "Evidencia no encontrada",
+        });
+      }
+
+      return res.json({
+        message: "Evidencia eliminada correctamente",
+        Evidencia: data,
+      });
+    } catch (error) {
+      console.error("DELETE /evidencias/:id error:", error);
+
+      return res.status(500).json({
+        message: "Error interno eliminando evidencia",
+        detail: error.message,
+      });
+    }
+  }
+);
+
+
+
+/* #################### Fin Subir evidencias a una evaluacion de una empresa ######################### */
+
+/* #################### Agregando los Eventos y relacionaodo con evidencias ################ */
+
+
+router.get(
+  "/detalle/:detalleId/eventos",
+  requireAuth,
+  authorizeEmpresaAccess({
+    requiredPermissions: ["EVALUACIONES_VER"],
+    resolveEmpresaId: async (req) => {
+      const detalleId = toInt(req.params.detalleId);
+      if (!detalleId || detalleId <= 0) return null;
+      return resolveCompanyIdByDetalleId(detalleId);
+    },
+  }),
+  async (req, res) => {
+    try {
+      const detalleId = toInt(req.params.detalleId);
+
+      if (!detalleId || detalleId <= 0) {
+        return res.status(400).json({
+          message: "detalleId inválido",
+        });
+      }
+
+      // 1) Traer eventos del detalle
+      const { data: eventos, error: eventosError } = await supabase
+        .from(TABLA_EVENTOS)
+        .select("id, IdEvaluacionDetalle, FechaRegistro, IdEvidencia, Comentario")
+        .eq("IdEvaluacionDetalle", detalleId)
+        .order("FechaRegistro", { ascending: false });
+
+      if (eventosError) {
+        return res.status(500).json({
+          message: "Error consultando eventos",
+          detail: eventosError.message,
+        });
+      }
+
+      const eventosRows = eventos || [];
+
+      // 2) Traer evidencias relacionadas para enriquecer la respuesta
+      const evidenciasIds = [
+        ...new Set(
+          eventosRows
+            .map((x) => Number(x.IdEvidencia))
+            .filter((x) => Number.isInteger(x) && x > 0)
+        ),
+      ];
+
+      let evidenciasMap = {};
+
+      if (evidenciasIds.length > 0) {
+        const { data: evidencias, error: evidenciasError } = await supabase
+          .from("Evidencias")
+          .select(
+            "id, Nombre, Descripcion, FechaRegistro, NombreArchivoOriginal, TipoMime"
+          )
+          .in("id", evidenciasIds);
+
+        if (evidenciasError) {
+          return res.status(500).json({
+            message: "Error consultando evidencias relacionadas",
+            detail: evidenciasError.message,
+          });
+        }
+
+        evidenciasMap = Object.fromEntries(
+          (evidencias || []).map((ev) => [Number(ev.id), ev])
+        );
+      }
+
+      const result = eventosRows.map((evento) => ({
+        ...evento,
+        Evidencia: evidenciasMap[Number(evento.IdEvidencia)] || null,
+      }));
+
+      return res.json({
+        Eventos: result,
+      });
+    } catch (error) {
+      console.error("GET /detalle/:detalleId/eventos error:", error);
+
+      return res.status(500).json({
+        message: "Error interno consultando eventos",
+        detail: error.message,
+      });
+    }
+  }
+);
+
+router.post(
+  "/detalle/:detalleId/eventos",
+  requireAuth,
+  authorizeEmpresaAccess({
+    requiredPermissions: ["EVALUACIONES_EDITAR"],
+    resolveEmpresaId: async (req) => {
+      const detalleId = toInt(req.params.detalleId);
+      if (!detalleId || detalleId <= 0) return null;
+      return resolveCompanyIdByDetalleId(detalleId);
+    },
+  }),
+  async (req, res) => {
+    try {
+      const detalleId = toInt(req.params.detalleId);
+      const fechaRegistro = (req.body?.fechaRegistro || "").toString().trim();
+      const idEvidencia = toInt(req.body?.idEvidencia);
+      const comentario = (req.body?.comentario || "").toString().trim();
+
+      if (!detalleId || detalleId <= 0) {
+        return res.status(400).json({
+          message: "detalleId inválido",
+        });
+      }
+
+      if (!fechaRegistro) {
+        return res.status(400).json({
+          message: "fechaRegistro es requerido",
+        });
+      }
+
+      if (!idEvidencia || idEvidencia <= 0) {
+        return res.status(400).json({
+          message: "idEvidencia es requerido",
+        });
+      }
+
+      // 1) Validar que el detalle exista
+      const { data: detalle, error: detalleError } = await supabase
+        .from("EvaluacionDetalle")
+        .select("id")
+        .eq("id", detalleId)
+        .maybeSingle();
+
+      if (detalleError) {
+        return res.status(500).json({
+          message: "Error validando el detalle de evaluación",
+          detail: detalleError.message,
+        });
+      }
+
+      if (!detalle) {
+        return res.status(404).json({
+          message: "EvaluacionDetalle no encontrado",
+        });
+      }
+
+      // 2) Validar que la evidencia exista y pertenezca al mismo detalle
+      const { data: evidencia, error: evidenciaError } = await supabase
+        .from("Evidencias")
+        .select("id, IdEvaluacionDetalle, Nombre")
+        .eq("id", idEvidencia)
+        .maybeSingle();
+
+      if (evidenciaError) {
+        return res.status(500).json({
+          message: "Error validando la evidencia",
+          detail: evidenciaError.message,
+        });
+      }
+
+      if (!evidencia) {
+        return res.status(404).json({
+          message: "Evidencia no encontrada",
+        });
+      }
+
+      if (Number(evidencia.IdEvaluacionDetalle) !== detalleId) {
+        return res.status(400).json({
+          message:
+            "La evidencia seleccionada no pertenece a este detalle de evaluación",
+        });
+      }
+
+      const fechaIso = new Date(`${fechaRegistro}T00:00:00`).toISOString();
+
+      // 3) Insertar evento
+      const { data: eventoCreado, error: insertError } = await supabase
+        .from(TABLA_EVENTOS)
+        .insert({
+          IdEvaluacionDetalle: detalleId,
+          FechaRegistro: fechaIso,
+          IdEvidencia: idEvidencia,
+          Comentario: comentario || null,
+        })
+        .select("id, IdEvaluacionDetalle, FechaRegistro, IdEvidencia, Comentario")
+        .single();
+
+      if (insertError) {
+        return res.status(500).json({
+          message: "Error guardando evento",
+          detail: insertError.message,
+        });
+      }
+
+      return res.status(201).json({
+        message: "Evento guardado correctamente",
+        Evento: {
+          ...eventoCreado,
+          Evidencia: {
+            id: evidencia.id,
+            Nombre: evidencia.Nombre,
+          },
+        },
+      });
+    } catch (error) {
+      console.error("POST /detalle/:detalleId/eventos error:", error);
+
+      return res.status(500).json({
+        message: "Error interno guardando evento",
+        detail: error.message,
+      });
+    }
+  }
+);
+
+router.delete(
+  "/eventos/:id",
+  requireAuth,
+  authorizeEmpresaAccess({
+    requiredPermissions: ["EVALUACIONES_EDITAR"],
+    resolveEmpresaId: async (req) => {
+      const eventoId = toInt(req.params.id);
+      if (!eventoId || eventoId <= 0) return null;
+      return resolveCompanyIdByEventoId(eventoId);
+    },
+  }),
+  async (req, res) => {
+    try {
+      const id = toInt(req.params.id);
+
+      if (!id || id <= 0) {
+        return res.status(400).json({
+          message: "id inválido",
+        });
+      }
+
+      const { data, error } = await supabase
+        .from(TABLA_EVENTOS)
+        .delete()
+        .eq("id", id)
+        .select("id, IdEvaluacionDetalle, FechaRegistro, IdEvidencia, Comentario")
+        .maybeSingle();
+
+      if (error) {
+        return res.status(500).json({
+          message: "Error eliminando evento",
+          detail: error.message,
+        });
+      }
+
+      if (!data) {
+        return res.status(404).json({
+          message: "Evento no encontrado",
+        });
+      }
+
+      return res.json({
+        message: "Evento eliminado correctamente",
+        Evento: data,
+      });
+    } catch (error) {
+      console.error("DELETE /eventos/:id error:", error);
+
+      return res.status(500).json({
+        message: "Error interno eliminando evento",
+        detail: error.message,
+      });
+    }
+  }
+);
+
+
+/* #################### Fin Agregando los Eventos y relacionaodo con evidencias ################ */
+
+/*###################  Agregando los responsables en evaluacion detalle ####################### */
+
+router.get(
+  "/detalle/:detalleId/responsables/catalogo",
+  requireAuth,
+  authorizeEmpresaAccess({
+    requiredPermissions: ["EVALUACIONES_VER"],
+    resolveEmpresaId: async (req) => {
+      const detalleId = toInt(req.params.detalleId);
+      if (!detalleId || detalleId <= 0) return null;
+      return resolveCompanyIdByDetalleId(detalleId);
+    },
+  }),
+  async (req, res) => {
+    try {
+      const detalleId = toInt(req.params.detalleId);
+      const q = (req.query?.q || "").toString().trim();
+
+      if (!detalleId || detalleId <= 0) {
+        return res.status(400).json({
+          message: "detalleId inválido",
+        });
+      }
+
+      let query = supabase
+        .from(TABLA_RESPONSABLES)
+        .select("id, Nombre, Correo, FechaRegistro")
+        .order("Nombre", { ascending: true });
+
+      if (q) {
+        query = query.or(`Nombre.ilike.%${q}%,Correo.ilike.%${q}%`);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        return res.status(500).json({
+          message: "Error consultando catálogo de responsables",
+          detail: error.message,
+        });
+      }
+
+      return res.json({
+        Responsables: data || [],
+      });
+    } catch (error) {
+      console.error("GET /detalle/:detalleId/responsables/catalogo error:", error);
+
+      return res.status(500).json({
+        message: "Error interno consultando catálogo de responsables",
+        detail: error.message,
+      });
+    }
+  }
+);
+
+router.post(
+  "/detalle/:detalleId/responsables",
+  requireAuth,
+  authorizeEmpresaAccess({
+    requiredPermissions: ["EVALUACIONES_EDITAR"],
+    resolveEmpresaId: async (req) => {
+      const detalleId = toInt(req.params.detalleId);
+      if (!detalleId || detalleId <= 0) return null;
+      return resolveCompanyIdByDetalleId(detalleId);
+    },
+  }),
+  async (req, res) => {
+    try {
+      const detalleId = toInt(req.params.detalleId);
+      const idResponsable = toInt(req.body?.idResponsable);
+
+      if (!detalleId || detalleId <= 0) {
+        return res.status(400).json({
+          message: "detalleId inválido",
+        });
+      }
+
+      if (!idResponsable || idResponsable <= 0) {
+        return res.status(400).json({
+          message: "idResponsable es requerido",
+        });
+      }
+
+      const empresaId = await resolveEmpresaIdFromDetalleId(detalleId);
+
+      if (!empresaId) {
+        return res.status(404).json({
+          message: "No se pudo resolver la empresa del detalle",
+        });
+      }
+
+      const { data: detalle, error: detalleError } = await supabase
+        .from("EvaluacionDetalle")
+        .select("id")
+        .eq("id", detalleId)
+        .maybeSingle();
+
+      if (detalleError) {
+        return res.status(500).json({
+          message: "Error validando el detalle de evaluación",
+          detail: detalleError.message,
+        });
+      }
+
+      if (!detalle) {
+        return res.status(404).json({
+          message: "EvaluacionDetalle no encontrado",
+        });
+      }
+
+      const { data: responsable, error: responsableError } = await supabase
+        .from(TABLA_RESPONSABLES)
+        .select("id, IdEmpresa, Nombre, Correo, FechaRegistro")
+        .eq("id", idResponsable)
+        .maybeSingle();
+
+      if (responsableError) {
+        return res.status(500).json({
+          message: "Error validando responsable",
+          detail: responsableError.message,
+        });
+      }
+
+      if (!responsable) {
+        return res.status(404).json({
+          message: "Responsable no encontrado",
+        });
+      }
+
+      if (Number(responsable.IdEmpresa) !== empresaId) {
+        return res.status(400).json({
+          message: "El responsable no pertenece a la empresa de este detalle",
+        });
+      }
+
+      const { data: existente, error: existenteError } = await supabase
+        .from(TABLA_REQUISITO_RESPONSABLES)
+        .select("id")
+        .eq("IdEvaluacionDetalle", detalleId)
+        .eq("IdResponsable", idResponsable)
+        .maybeSingle();
+
+      if (existenteError) {
+        return res.status(500).json({
+          message: "Error validando asignación existente",
+          detail: existenteError.message,
+        });
+      }
+
+      if (existente) {
+        return res.status(409).json({
+          message: "Este responsable ya está asignado al requisito",
+        });
+      }
+
+      const { data: relacion, error: insertError } = await supabase
+        .from(TABLA_REQUISITO_RESPONSABLES)
+        .insert({
+          IdEvaluacionDetalle: detalleId,
+          IdResponsable: idResponsable,
+          FechaRegistro: new Date().toISOString(),
+        })
+        .select("id, IdEvaluacionDetalle, IdResponsable, FechaRegistro")
+        .single();
+
+      if (insertError) {
+        return res.status(500).json({
+          message: "Error asignando responsable",
+          detail: insertError.message,
+        });
+      }
+
+      return res.status(201).json({
+        message: "Responsable asignado correctamente",
+        ResponsableAsignado: {
+          ...relacion,
+          Responsable: responsable,
+        },
+      });
+    } catch (error) {
+      console.error("POST /detalle/:detalleId/responsables error:", error);
+
+      return res.status(500).json({
+        message: "Error interno asignando responsable",
+        detail: error.message,
+      });
+    }
+  }
+);
+
+router.get(
+  "/detalle/:detalleId/responsables",
+  requireAuth,
+  authorizeEmpresaAccess({
+    requiredPermissions: ["EVALUACIONES_VER"],
+    resolveEmpresaId: async (req) => {
+      const detalleId = toInt(req.params.detalleId);
+      if (!detalleId || detalleId <= 0) return null;
+      return resolveCompanyIdByDetalleId(detalleId);
+    },
+  }),
+  async (req, res) => {
+    try {
+      const detalleId = toInt(req.params.detalleId);
+
+      if (!detalleId || detalleId <= 0) {
+        return res.status(400).json({
+          message: "detalleId inválido",
+        });
+      }
+
+      const { data: relaciones, error: relacionesError } = await supabase
+        .from(TABLA_REQUISITO_RESPONSABLES)
+        .select("id, IdEvaluacionDetalle, IdResponsable, FechaRegistro")
+        .eq("IdEvaluacionDetalle", detalleId)
+        .order("FechaRegistro", { ascending: false });
+
+      if (relacionesError) {
+        return res.status(500).json({
+          message: "Error consultando responsables asignados",
+          detail: relacionesError.message,
+        });
+      }
+
+      const relacionesRows = relaciones || [];
+
+      const responsablesIds = [
+        ...new Set(
+          relacionesRows
+            .map((x) => Number(x.IdResponsable))
+            .filter((x) => Number.isInteger(x) && x > 0)
+        ),
+      ];
+
+      let responsablesMap = {};
+
+      if (responsablesIds.length > 0) {
+        const { data: responsables, error: responsablesError } = await supabase
+          .from(TABLA_RESPONSABLES)
+          .select("id, IdEmpresa, Nombre, Correo, FechaRegistro")
+          .in("id", responsablesIds);
+
+        if (responsablesError) {
+          return res.status(500).json({
+            message: "Error consultando datos de responsables",
+            detail: responsablesError.message,
+          });
+        }
+
+        responsablesMap = Object.fromEntries(
+          (responsables || []).map((r) => [Number(r.id), r])
+        );
+      }
+
+      const result = relacionesRows.map((rel) => ({
+        ...rel,
+        Responsable: responsablesMap[Number(rel.IdResponsable)] || null,
+      }));
+
+      return res.json({
+        ResponsablesAsignados: result,
+      });
+    } catch (error) {
+      console.error("GET /detalle/:detalleId/responsables error:", error);
+
+      return res.status(500).json({
+        message: "Error interno consultando responsables asignados",
+        detail: error.message,
+      });
+    }
+  }
+);
+
+router.get(
+  "/detalle/:detalleId/responsables/disponibles",
+  requireAuth,
+  authorizeEmpresaAccess({
+    requiredPermissions: ["EVALUACIONES_VER"],
+    resolveEmpresaId: async (req) => {
+      const detalleId = toInt(req.params.detalleId);
+      if (!detalleId || detalleId <= 0) return null;
+      return resolveCompanyIdByDetalleId(detalleId);
+    },
+  }),
+  async (req, res) => {
+    try {
+      const detalleId = toInt(req.params.detalleId);
+      const q = (req.query?.q || "").toString().trim();
+
+      if (!detalleId || detalleId <= 0) {
+        return res.status(400).json({
+          message: "detalleId inválido",
+        });
+      }
+
+      const empresaId = await resolveEmpresaIdFromDetalleId(detalleId);
+
+      if (!empresaId) {
+        return res.status(404).json({
+          message: "No se pudo resolver la empresa del detalle",
+        });
+      }
+
+      let query = supabase
+        .from(TABLA_RESPONSABLES)
+        .select("id, IdEmpresa, Nombre, Correo, FechaRegistro")
+        .eq("IdEmpresa", empresaId)
+        .order("Nombre", { ascending: true });
+
+      if (q) {
+        query = query.or(`Nombre.ilike.%${q}%,Correo.ilike.%${q}%`);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        return res.status(500).json({
+          message: "Error consultando responsables disponibles",
+          detail: error.message,
+        });
+      }
+
+      return res.json({
+        Responsables: data || [],
+      });
+    } catch (error) {
+      console.error("GET /detalle/:detalleId/responsables/disponibles error:", error);
+
+      return res.status(500).json({
+        message: "Error interno consultando responsables disponibles",
+        detail: error.message,
+      });
+    }
+  }
+);
+
+
+router.post(
+  "/detalle/:detalleId/responsables/nuevo",
+  requireAuth,
+  authorizeEmpresaAccess({
+    requiredPermissions: ["EVALUACIONES_EDITAR"],
+    resolveEmpresaId: async (req) => {
+      const detalleId = toInt(req.params.detalleId);
+      if (!detalleId || detalleId <= 0) return null;
+      return resolveCompanyIdByDetalleId(detalleId);
+    },
+  }),
+  async (req, res) => {
+    try {
+      const detalleId = toInt(req.params.detalleId);
+      const nombre = (req.body?.nombre || "").toString().trim();
+      const correo = (req.body?.correo || "").toString().trim();
+
+      if (!detalleId || detalleId <= 0) {
+        return res.status(400).json({
+          message: "detalleId inválido",
+        });
+      }
+
+      if (!nombre) {
+        return res.status(400).json({
+          message: "nombre es requerido",
+        });
+      }
+
+      const empresaId = await resolveEmpresaIdFromDetalleId(detalleId);
+
+      if (!empresaId) {
+        return res.status(404).json({
+          message: "No se pudo resolver la empresa del detalle",
+        });
+      }
+
+      const { data: detalle, error: detalleError } = await supabase
+        .from("EvaluacionDetalle")
+        .select("id")
+        .eq("id", detalleId)
+        .maybeSingle();
+
+      if (detalleError) {
+        return res.status(500).json({
+          message: "Error validando el detalle de evaluación",
+          detail: detalleError.message,
+        });
+      }
+
+      if (!detalle) {
+        return res.status(404).json({
+          message: "EvaluacionDetalle no encontrado",
+        });
+      }
+
+      // Buscar si ya existe uno igual en la misma empresa
+      let responsableExistente = null;
+
+      if (correo) {
+        const { data } = await supabase
+          .from(TABLA_RESPONSABLES)
+          .select("id, IdEmpresa, Nombre, Correo, FechaRegistro")
+          .eq("IdEmpresa", empresaId)
+          .eq("Correo", correo)
+          .maybeSingle();
+
+        responsableExistente = data || null;
+      } else {
+        const { data } = await supabase
+          .from(TABLA_RESPONSABLES)
+          .select("id, IdEmpresa, Nombre, Correo, FechaRegistro")
+          .eq("IdEmpresa", empresaId)
+          .eq("Nombre", nombre)
+          .maybeSingle();
+
+        responsableExistente = data || null;
+      }
+
+      let responsable = responsableExistente;
+
+      if (!responsable) {
+        const { data: creado, error: createError } = await supabase
+          .from(TABLA_RESPONSABLES)
+          .insert({
+            IdEmpresa: empresaId,
+            Nombre: nombre,
+            Correo: correo || null,
+            FechaRegistro: new Date().toISOString(),
+          })
+          .select("id, IdEmpresa, Nombre, Correo, FechaRegistro")
+          .single();
+
+        if (createError) {
+          return res.status(500).json({
+            message: "Error creando responsable",
+            detail: createError.message,
+          });
+        }
+
+        responsable = creado;
+      }
+
+      const { data: asignacionExistente, error: asignacionExistenteError } =
+        await supabase
+          .from(TABLA_REQUISITO_RESPONSABLES)
+          .select("id")
+          .eq("IdEvaluacionDetalle", detalleId)
+          .eq("IdResponsable", responsable.id)
+          .maybeSingle();
+
+      if (asignacionExistenteError) {
+        return res.status(500).json({
+          message: "Error validando asignación existente",
+          detail: asignacionExistenteError.message,
+        });
+      }
+
+      if (asignacionExistente) {
+        return res.status(409).json({
+          message: "Este responsable ya está asignado al requisito",
+          Responsable: responsable,
+        });
+      }
+
+      const { data: relacion, error: insertError } = await supabase
+        .from(TABLA_REQUISITO_RESPONSABLES)
+        .insert({
+          IdEvaluacionDetalle: detalleId,
+          IdResponsable: responsable.id,
+          FechaRegistro: new Date().toISOString(),
+        })
+        .select("id, IdEvaluacionDetalle, IdResponsable, FechaRegistro")
+        .single();
+
+      if (insertError) {
+        return res.status(500).json({
+          message: "Error asignando responsable nuevo",
+          detail: insertError.message,
+        });
+      }
+
+      return res.status(201).json({
+        message: "Responsable creado y asignado correctamente",
+        ResponsableAsignado: {
+          ...relacion,
+          Responsable: responsable,
+        },
+      });
+    } catch (error) {
+      console.error("POST /detalle/:detalleId/responsables/nuevo error:", error);
+
+      return res.status(500).json({
+        message: "Error interno creando y asignando responsable",
+        detail: error.message,
+      });
+    }
+  }
+);
+
+router.delete(
+  "/requisito-responsables/:id",
+  requireAuth,
+  authorizeEmpresaAccess({
+    requiredPermissions: ["EVALUACIONES_EDITAR"],
+    resolveEmpresaId: async (req) => {
+      const relacionId = toInt(req.params.id);
+      if (!relacionId || relacionId <= 0) return null;
+      return resolveCompanyIdByRequisitoResponsableId(relacionId);
+    },
+  }),
+  async (req, res) => {
+    try {
+      const id = toInt(req.params.id);
+
+      if (!id || id <= 0) {
+        return res.status(400).json({
+          message: "id inválido",
+        });
+      }
+
+      const { data, error } = await supabase
+        .from(TABLA_REQUISITO_RESPONSABLES)
+        .delete()
+        .eq("id", id)
+        .select("id, IdEvaluacionDetalle, IdResponsable, FechaRegistro")
+        .maybeSingle();
+
+      if (error) {
+        return res.status(500).json({
+          message: "Error eliminando asignación de responsable",
+          detail: error.message,
+        });
+      }
+
+      if (!data) {
+        return res.status(404).json({
+          message: "Asignación no encontrada",
+        });
+      }
+
+      return res.json({
+        message: "Responsable desasignado correctamente",
+        ResponsableAsignado: data,
+      });
+    } catch (error) {
+      console.error("DELETE /requisito-responsables/:id error:", error);
+
+      return res.status(500).json({
+        message: "Error interno eliminando asignación de responsable",
+        detail: error.message,
+      });
+    }
+  }
+);
+
+
+/*################### Fin Agregando los responsables en evaluacion detalle ####################### */
+
+
+export default router;
