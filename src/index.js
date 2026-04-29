@@ -19,13 +19,15 @@ const app = express();
 
 app.use(helmet());
 app.use(morgan("dev"));
-app.use(express.json());
+
 
 app.use(
   cors({
     origin: process.env.CORS_ORIGIN,
    // origin: process.env.FRONTEND_URL,
     credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
 
@@ -34,7 +36,7 @@ const authLimiter = rateLimit({
   max: 30,
 });
 
-
+app.use(express.json());
 app.get('/', (req, res) => {
   res.json({ message: 'CSI Legal API funcionando' });
 });
