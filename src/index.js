@@ -60,4 +60,4 @@ app.use("/api/subcategorias", subcategoriasRoutes);
 const port = process.env.PORT || 4000;
 //app.listen(port, () => console.log(`CSI_Legal_Api running on port ${port}`)); En Vercel no se nmecsita esto
 
-module.exports = app;
+export default app;
