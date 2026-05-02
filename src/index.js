@@ -62,4 +62,14 @@ app.use("/api/subcategorias", subcategoriasRoutes);
 const port = process.env.PORT || 4000;
 //app.listen(port, () => console.log(`CSI_Legal_Api running on port ${port}`)); En Vercel no se nmecsita esto
 
+//Localhost → usa app.listen()
+//Vercel → usa export default app
+
+// Esto es para publicar en Vercel
+if (!process.env.VERCEL) {
+  app.listen(port, () => {
+    console.log(`CSI Legal API corriendo en http://localhost:${port}`);
+  });
+}
+
 export default app;
