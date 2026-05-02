@@ -13,6 +13,9 @@ function toInt(v) {
   const n = Number(v);
   return Number.isInteger(n) ? n : null;
 }
+/*#################### HELPERS Y FUNCIONES GENERALES DE EVALUACIONES ##################### */
+
+
 
 /* Helpers para subir archivos y documentos */
 const uploadEvidence = multer({
@@ -226,7 +229,7 @@ async function resolveCompanyIdByEventoId(eventoId) {
 
 const TABLA_RESPONSABLES = "Responsables";
 const TABLA_REQUISITO_RESPONSABLES = "RequisitoResponsables"; 
-
+const TABLA_PERIOCIDAD = "Periocidad";
 
 async function resolveCompanyIdByRequisitoResponsableId(relacionId) {
   const { data: relacion, error: relacionError } = await supabase
@@ -250,6 +253,130 @@ async function resolveEmpresaIdFromDetalleId(detalleId) {
 
   return Number(empresaId);
 }
+
+
+/*############### Helpers para editar informacion del requisito *#####################*/
+
+function getPeriocidadNombre(row) {
+  if (!row) return "";
+
+  return (
+    row.Periocidad ||
+    row.Nombre ||
+    row.Descripcion ||
+    row.NombrePeriocidad ||
+    `Periodicidad #${row.id}`
+  );
+}
+
+function normalizeDateOnly(value) {
+  if (!value) return null;
+
+  const raw = value.toString().trim();
+
+  // Ya viene como yyyy-MM-dd
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return raw;
+  }
+
+  const date = new Date(raw);
+
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return date.toISOString().slice(0, 10);
+}
+
+async function buildDetalleInformacionResponse(detalle) {
+  const { data: requisito, error: requisitoError } = await supabase
+    .from("vw_RequisitoListado")
+    .select(
+      'id, "Titulo", "DescripcionRequisito", "ResponsableEjecucion", "IdPais", "IdSubCategoria", "IdPeriocidad"'
+    )
+    .eq("id", detalle.IdRequisito)
+    .maybeSingle();
+
+  if (requisitoError) {
+    const error = new Error("Error consultando información del requisito");
+    error.detail = requisitoError.message;
+    throw error;
+  }
+
+  const { data: estado, error: estadoError } = await supabase
+    .from("EstadoRequisito")
+    .select('id, "Estado"')
+    .eq("id", detalle.IdEstadoRequisito)
+    .maybeSingle();
+
+  if (estadoError) {
+    const error = new Error("Error consultando estado del requisito");
+    error.detail = estadoError.message;
+    throw error;
+  }
+
+  let periocidad = null;
+
+  if (detalle.IdPeriocidad) {
+    const { data: periocidadRow, error: periocidadError } = await supabase
+      .from(TABLA_PERIOCIDAD)
+      .select("*")
+      .eq("id", detalle.IdPeriocidad)
+      .maybeSingle();
+
+    if (periocidadError) {
+      const error = new Error("Error consultando periodicidad");
+      error.detail = periocidadError.message;
+      throw error;
+    }
+
+    periocidad = periocidadRow;
+  }
+
+  return {
+    id: detalle.id,
+    evaluacionId: detalle.IdEvaluacionEncabezado,
+    requisitoId: detalle.IdRequisito,
+
+    name: requisito?.Titulo || `Requisito #${detalle.IdRequisito}`,
+    description: requisito?.DescripcionRequisito || "",
+
+    estadoId: detalle.IdEstadoRequisito,
+    status: estado?.Estado || "Desconocido",
+
+    // Campos propios del detalle por empresa
+    fechaPlanificada: detalle.FechaPlanificada || null,
+    responsible: detalle.Responsable || "",
+    idPeriocidad: detalle.IdPeriocidad || null,
+    periodicity: getPeriocidadNombre(periocidad),
+
+    fechaRegistro: detalle.FechaRegistro || null,
+    UltimaActualizacion: detalle.UltimaActualizacion || null,
+    lastUpdate: detalle.UltimaActualizacion || detalle.FechaRegistro || null,
+
+    // Solo como referencia del catálogo, no editable en Información
+    responsableCatalogo: requisito?.ResponsableEjecucion || null,
+  };
+}
+
+/*############# Helper para resolver empresa por evaluacion ################*/
+
+async function resolveCompanyIdByEvaluacionId(evaluacionId) {
+  const { data: evaluacion, error } = await supabase
+    .from("EvaluacionEncabezado")
+    .select('id, "IdEmpresa"')
+    .eq("id", evaluacionId)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!evaluacion) return null;
+
+  return Number(evaluacion.IdEmpresa) || null;
+}
+
+/*#################### FIN HELPERS Y FUNCIONES GENERALES DE EVALUACIONES ##################### */
+
+
 
 /**
  * GET /api/evaluaciones/actual?companyId=1
@@ -608,9 +735,10 @@ router.get(
       const { data: detalles, error: detErr } = await supabase
         .from("EvaluacionDetalle")
         .select(
-          'id, "FechaRegistro", "IdEvaluacionEncabezado", "IdRequisito", "IdEstadoRequisito", "IdPeriocidad"'
+         'id, "FechaRegistro", "FechaPlanificada", "Responsable", "UltimaActualizacion", "IdEvaluacionEncabezado", "IdRequisito", "IdEstadoRequisito", "IdPeriocidad"'
         )
-        .eq("IdEvaluacionEncabezado", evaluacionId);
+        .eq("IdEvaluacionEncabezado", evaluacionId)
+        .order("id", { ascending: true });
 
       if (detErr) {
         console.error(`[${requestId}] ERROR EvaluacionDetalle`, detErr);
@@ -653,29 +781,80 @@ router.get(
         });
       }
 
+              const periocidadIds = [
+          ...new Set(
+            detallesSafe
+              .map((d) => Number(d.IdPeriocidad))
+              .filter((id) => Number.isInteger(id) && id > 0)
+          ),
+        ];
+
+        let periocidadMap = new Map();
+
+        if (periocidadIds.length > 0) {
+          const { data: periocidades, error: periocidadErr } = await supabase
+            .from(TABLA_PERIOCIDAD)
+            .select("*")
+            .in("id", periocidadIds);
+
+          if (periocidadErr) {
+            console.error(`[${requestId}] ERROR Periocidad`, periocidadErr);
+            return res.status(500).json({
+              message: "Error consultando Periocidad",
+              detail: periocidadErr.message,
+            });
+          }
+
+          periocidadMap = new Map(
+            (periocidades || []).map((p) => [
+              Number(p.id),
+              p.Periocidad ||
+                p.Nombre ||
+                p.Descripcion ||
+                p.NombrePeriocidad ||
+                "No definido",
+            ])
+          );
+        }
+
+
+
       const reqMap = new Map((requisitos || []).map((r) => [r.id, r]));
       const estadoMap = new Map((estados || []).map((e) => [e.id, e.Estado]));
 
-      const items = detallesSafe.map((d) => {
-        const r = reqMap.get(d.IdRequisito);
-        const estadoNombre = estadoMap.get(d.IdEstadoRequisito) || "Desconocido";
+          const items = detallesSafe.map((d) => {
+          const r = reqMap.get(d.IdRequisito);
+          const estadoNombre = estadoMap.get(d.IdEstadoRequisito) || "Desconocido";
 
-        return {
-          id: d.id,
-          evaluacionId: d.IdEvaluacionEncabezado,
-          requisitoId: d.IdRequisito,
-          name: r?.Titulo || `Requisito #${d.IdRequisito}`,
-          description: r?.DescripcionRequisito || "",
-          estadoId: d.IdEstadoRequisito,
-          status: estadoNombre,
-          responsible: r?.ResponsableEjecucion
-            ? `Responsable #${r.ResponsableEjecucion}`
-            : "—",
-          periodicity: d.IdPeriocidad ? `Periodicidad #${d.IdPeriocidad}` : "—",
-          lastUpdate: d.FechaRegistro,
-        };
-      });
+          const idPeriocidad = d.IdPeriocidad ? Number(d.IdPeriocidad) : null;
+          const nombrePeriocidad = idPeriocidad
+            ? periocidadMap.get(idPeriocidad)
+            : null;
 
+          return {
+            id: d.id,
+            evaluacionId: d.IdEvaluacionEncabezado,
+            requisitoId: d.IdRequisito,
+            name: r?.Titulo || `Requisito #${d.IdRequisito}`,
+            description: r?.DescripcionRequisito || "",
+            estadoId: d.IdEstadoRequisito,
+            status: estadoNombre,
+
+            // Campos propios de EvaluacionDetalle
+            responsible: d.Responsable || "No definido",
+            responsable: d.Responsable || null,
+
+            plannedDate: d.FechaPlanificada || null,
+            fechaPlanificada: d.FechaPlanificada || null,
+
+            idPeriocidad,
+            periodicity: nombrePeriocidad || "No definido",
+            periocidad: nombrePeriocidad || null,
+
+            lastUpdate: d.UltimaActualizacion || d.FechaRegistro || null,
+            ultimaActualizacion: d.UltimaActualizacion || null,
+          };
+        });
       const total = detallesSafe.length;
       const countsByEstadoId = new Map();
 
@@ -762,7 +941,7 @@ router.put(
         .from("EvaluacionDetalle")
         .select('id, "IdEvaluacionEncabezado", "IdEstadoRequisito"')
         .eq("id", detalleId)
-        .maybeSingle();
+        .order("id", { ascending: true });
 
       if (detErr) {
         return res.status(500).json({
@@ -827,6 +1006,7 @@ router.put(
     }
   }
 );
+
 
 /* #################### Subir evidencias a una evaluacion de una empresa ######################### */
 
@@ -1137,12 +1317,9 @@ router.delete(
   }
 );
 
-
-
 /* #################### Fin Subir evidencias a una evaluacion de una empresa ######################### */
 
 /* #################### Agregando los Eventos y relacionaodo con evidencias ################ */
-
 
 router.get(
   "/detalle/:detalleId/eventos",
@@ -1411,7 +1588,6 @@ router.delete(
     }
   }
 );
-
 
 /* #################### Fin Agregando los Eventos y relacionaodo con evidencias ################ */
 
@@ -1969,8 +2145,383 @@ router.delete(
   }
 );
 
-
 /*################### Fin Agregando los responsables en evaluacion detalle ####################### */
 
+
+/*#################   Agregamos 2 enpoints para mejorar el campo de Informacion dentro del detalle de la evaluacion por requisito      #######################*/
+
+/*### La solución correcta es agregar dos endpoints nuevos en tu mismo evaluaciones.routes.js: *###/
+/*#### GET /api/evaluaciones/detalle/:detalleId/informacion ###*/
+/*#### PUT /api/evaluaciones/detalle/:detalleId/informacion ##############*/
+
+/**
+ * GET /api/evaluaciones/detalle/:detalleId/informacion
+ * Lee la información del requisito desde EvaluacionDetalle.
+ * 
+ * Campos editables:
+ * - FechaPlanificada
+ * - Responsable
+ * - IdPeriocidad
+ * 
+ * Campos no editables:
+ * - Nombre del requisito
+ * - Descripción
+ * - Estado
+ */
+router.get(
+  "/detalle/:detalleId/informacion",
+  requireAuth,
+  authorizeEmpresaAccess({
+    requiredPermissions: ["EVALUACIONES_VER"],
+    resolveEmpresaId: async (req) => {
+      const detalleId = toInt(req.params.detalleId);
+      if (!detalleId || detalleId <= 0) return null;
+      return resolveCompanyIdByDetalleId(detalleId);
+    },
+  }),
+  async (req, res) => {
+    try {
+      const detalleId = toInt(req.params.detalleId);
+
+      if (!detalleId || detalleId <= 0) {
+        return res.status(400).json({
+          message: "detalleId inválido",
+        });
+      }
+
+      const { data: detalle, error: detalleError } = await supabase
+        .from("EvaluacionDetalle")
+        .select(
+          'id, "FechaRegistro", "FechaPlanificada", "Responsable", "UltimaActualizacion", "IdEvaluacionEncabezado", "IdRequisito", "IdEstadoRequisito", "IdPeriocidad"'
+        )
+        .eq("id", detalleId)
+        .maybeSingle();
+
+      if (detalleError) {
+        return res.status(500).json({
+          message: "Error consultando EvaluacionDetalle",
+          detail: detalleError.message,
+        });
+      }
+
+      if (!detalle) {
+        return res.status(404).json({
+          message: "EvaluacionDetalle no encontrado",
+        });
+      }
+
+      const informacion = await buildDetalleInformacionResponse(detalle);
+
+      return res.json({
+        Informacion: informacion,
+      });
+    } catch (error) {
+      console.error("GET /detalle/:detalleId/informacion error:", error);
+
+      return res.status(500).json({
+        message: error.message || "Error interno consultando información",
+        detail: error.detail || error.message,
+      });
+    }
+  }
+);
+
+/**
+ * PUT /api/evaluaciones/detalle/:detalleId/informacion
+ * Actualiza solamente información propia del detalle por empresa.
+ */
+router.put(
+  "/detalle/:detalleId/informacion",
+  requireAuth,
+  authorizeEmpresaAccess({
+    requiredPermissions: ["EVALUACIONES_EDITAR"],
+    resolveEmpresaId: async (req) => {
+      const detalleId = toInt(req.params.detalleId);
+      if (!detalleId || detalleId <= 0) return null;
+      return resolveCompanyIdByDetalleId(detalleId);
+    },
+  }),
+  async (req, res) => {
+    try {
+      const detalleId = toInt(req.params.detalleId);
+
+      const fechaPlanificada = normalizeDateOnly(req.body?.fechaPlanificada);
+      const responsable = (req.body?.responsable || "").toString().trim();
+      const idPeriocidad = toInt(req.body?.idPeriocidad);
+
+      if (!detalleId || detalleId <= 0) {
+        return res.status(400).json({
+          message: "detalleId inválido",
+        });
+      }
+
+      if (!fechaPlanificada) {
+        return res.status(400).json({
+          message: "fechaPlanificada es requerida y debe tener formato válido",
+        });
+      }
+
+      if (!responsable) {
+        return res.status(400).json({
+          message: "responsable es requerido",
+        });
+      }
+
+      if (!idPeriocidad || idPeriocidad <= 0) {
+        return res.status(400).json({
+          message: "idPeriocidad es requerido",
+        });
+      }
+
+      const { data: detalle, error: detalleError } = await supabase
+        .from("EvaluacionDetalle")
+        .select(
+          'id, "IdEvaluacionEncabezado", "IdRequisito", "IdEstadoRequisito", "IdPeriocidad"'
+        )
+        .eq("id", detalleId)
+        .maybeSingle();
+
+      if (detalleError) {
+        return res.status(500).json({
+          message: "Error consultando EvaluacionDetalle",
+          detail: detalleError.message,
+        });
+      }
+
+      if (!detalle) {
+        return res.status(404).json({
+          message: "EvaluacionDetalle no encontrado",
+        });
+      }
+
+      const { data: encabezado, error: encabezadoError } = await supabase
+        .from("EvaluacionEncabezado")
+        .select('id, "Estado"')
+        .eq("id", detalle.IdEvaluacionEncabezado)
+        .maybeSingle();
+
+      if (encabezadoError) {
+        return res.status(500).json({
+          message: "Error consultando EvaluacionEncabezado",
+          detail: encabezadoError.message,
+        });
+      }
+
+      if (!encabezado) {
+        return res.status(404).json({
+          message: "EvaluacionEncabezado no existe para este detalle",
+        });
+      }
+
+      if (encabezado.Estado !== 1) {
+        return res.status(409).json({
+          message: "La evaluación no está activa (Estado != 1)",
+        });
+      }
+
+      const { data: periocidad, error: periocidadError } = await supabase
+        .from(TABLA_PERIOCIDAD)
+        .select("*")
+        .eq("id", idPeriocidad)
+        .maybeSingle();
+
+      if (periocidadError) {
+        return res.status(500).json({
+          message: "Error consultando periodicidad",
+          detail: periocidadError.message,
+        });
+      }
+
+      if (!periocidad) {
+        return res.status(404).json({
+          message: "La periodicidad seleccionada no existe",
+        });
+      }
+
+      const { data: updated, error: updateError } = await supabase
+        .from("EvaluacionDetalle")
+        .update({
+          FechaPlanificada: fechaPlanificada,
+          Responsable: responsable,
+          IdPeriocidad: idPeriocidad,
+          UltimaActualizacion: new Date().toISOString(),
+        })
+        .eq("id", detalleId)
+        .select(
+          'id, "FechaRegistro", "FechaPlanificada", "Responsable", "UltimaActualizacion", "IdEvaluacionEncabezado", "IdRequisito", "IdEstadoRequisito", "IdPeriocidad"'
+        )
+        .single();
+
+      if (updateError) {
+        return res.status(500).json({
+          message: "Error actualizando información del detalle",
+          detail: updateError.message,
+        });
+      }
+
+      const informacion = await buildDetalleInformacionResponse(updated);
+
+      return res.json({
+        message: "Información actualizada correctamente",
+        Informacion: informacion,
+      });
+    } catch (error) {
+      console.error("PUT /detalle/:detalleId/informacion error:", error);
+
+      return res.status(500).json({
+        message: "Error interno actualizando información",
+        detail: error.message,
+      });
+    }
+  }
+);
+
+
+/*#################  Fin Agregamos 2 enpoints para mejorar el campo de Informacion dentro del detalle de la evaluacion por requisito      #######################*/
+
+/*##################### Endpoint para guardar los cambios de evaluacion ##################### */
+
+/**
+ * PUT /api/evaluaciones/:evaluacionId/guardar-cambios
+ * Actualiza los campos resumen del encabezado de evaluación.
+ *
+ * Campos:
+ * - UltimaVerificacion
+ * - UltimoHistorico
+ * - ProximoEvento
+ */
+router.put(
+  "/:evaluacionId/guardar-cambios",
+  requireAuth,
+  authorizeEmpresaAccess({
+    requiredPermissions: ["EVALUACIONES_EDITAR"],
+    resolveEmpresaId: async (req) => {
+      const evaluacionId = toInt(req.params.evaluacionId);
+      if (!evaluacionId || evaluacionId <= 0) return null;
+      return resolveCompanyIdByEvaluacionId(evaluacionId);
+    },
+  }),
+  async (req, res) => {
+    try {
+      const evaluacionId = toInt(req.params.evaluacionId);
+
+      if (!evaluacionId || evaluacionId <= 0) {
+        return res.status(400).json({
+          message: "evaluacionId inválido",
+        });
+      }
+
+      const { data: evaluacion, error: evaluacionError } = await supabase
+        .from("EvaluacionEncabezado")
+        .select('id, "IdEmpresa", "Estado"')
+        .eq("id", evaluacionId)
+        .maybeSingle();
+
+      if (evaluacionError) {
+        return res.status(500).json({
+          message: "Error consultando EvaluacionEncabezado",
+          detail: evaluacionError.message,
+        });
+      }
+
+      if (!evaluacion) {
+        return res.status(404).json({
+          message: "EvaluacionEncabezado no encontrado",
+        });
+      }
+
+      if (evaluacion.Estado !== 1) {
+        return res.status(409).json({
+          message: "La evaluación no está activa (Estado != 1)",
+        });
+      }
+
+      const { data: detalles, error: detallesError } = await supabase
+        .from("EvaluacionDetalle")
+        .select('id, "FechaRegistro", "UltimaActualizacion"')
+        .eq("IdEvaluacionEncabezado", evaluacionId);
+
+      if (detallesError) {
+        return res.status(500).json({
+          message: "Error consultando detalles de evaluación",
+          detail: detallesError.message,
+        });
+      }
+
+      const detallesSafe = detalles || [];
+
+      const detalleIds = detallesSafe
+        .map((d) => Number(d.id))
+        .filter((id) => Number.isInteger(id) && id > 0);
+
+      const now = new Date();
+      const nowIso = now.toISOString();
+
+      let ultimoHistorico = null;
+
+      const fechasHistorico = detallesSafe
+        .map((d) => d.UltimaActualizacion || d.FechaRegistro)
+        .filter(Boolean)
+        .map((fecha) => new Date(fecha))
+        .filter((fecha) => !Number.isNaN(fecha.getTime()))
+        .sort((a, b) => b.getTime() - a.getTime());
+
+      if (fechasHistorico.length > 0) {
+        ultimoHistorico = fechasHistorico[0].toISOString();
+      }
+
+      let proximoEvento = null;
+
+      if (detalleIds.length > 0) {
+        const { data: eventos, error: eventosError } = await supabase
+          .from(TABLA_EVENTOS)
+          .select('id, "IdEvaluacionDetalle", "FechaRegistro"')
+          .in("IdEvaluacionDetalle", detalleIds)
+          .gte("FechaRegistro", nowIso)
+          .order("FechaRegistro", { ascending: true })
+          .limit(1);
+
+        if (eventosError) {
+          return res.status(500).json({
+            message: "Error consultando próximo evento",
+            detail: eventosError.message,
+          });
+        }
+
+        proximoEvento = eventos?.[0]?.FechaRegistro || null;
+      }
+
+      const { data: updated, error: updateError } = await supabase
+        .from("EvaluacionEncabezado")
+        .update({
+          UltimaVerificacion: nowIso,
+          UltimoHistorico: ultimoHistorico || nowIso,
+          ProximoEvento: proximoEvento,
+        })
+        .eq("id", evaluacionId)
+        .select("*")
+        .single();
+
+      if (updateError) {
+        return res.status(500).json({
+          message: "Error actualizando encabezado de evaluación",
+          detail: updateError.message,
+        });
+      }
+
+      return res.json({
+        message: "Cambios de evaluación guardados correctamente",
+        Evaluacion: updated,
+      });
+    } catch (error) {
+      console.error("PUT /:evaluacionId/guardar-cambios error:", error);
+
+      return res.status(500).json({
+        message: "Error interno guardando cambios de evaluación",
+        detail: error.message,
+      });
+    }
+  }
+);
 
 export default router;
