@@ -14,6 +14,9 @@ import estadosRequisitoRoutes from "./routes/estadosRequisito.routes.js";
 import requisitosMantenimientoRoutes from "./routes/requisitosMantenimiento.routes.js"
 import periocidadRoutes from "./routes/periocidad.routes.js";
 import subcategoriasRoutes from "./routes/subcategorias.routes.js";
+import usuariosRoutes from "./routes/usuarios.routes.js";
+import rolesRoutes from "./routes/roles.routes.js";
+import permisosRoutes from "./routes/permisos.routes.js";
 
 const app = express();
 
@@ -58,7 +61,9 @@ app.use("/api/estados-requisito", estadosRequisitoRoutes);
 app.use("/api/requisitos-mantenimiento", requisitosMantenimientoRoutes);
 app.use("/api/periocidad", periocidadRoutes);
 app.use("/api/subcategorias", subcategoriasRoutes);
-
+app.use("/api/usuarios", usuariosRoutes);
+app.use("/api/roles", rolesRoutes);
+app.use("/api/permisos", permisosRoutes);
 const port = process.env.PORT || 4000;
 //app.listen(port, () => console.log(`CSI_Legal_Api running on port ${port}`)); En Vercel no se nmecsita esto
 
