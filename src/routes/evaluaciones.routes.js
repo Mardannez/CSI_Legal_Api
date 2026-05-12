@@ -3,7 +3,7 @@ import { supabase } from "../lib/supabase.js";
 import { requireAuth } from "../middlewares/auth.middleware.js";
 import { authorizeEmpresaAccess } from "../middlewares/authorizeEmpresaAcces.middleware.js";
 import multer from 'multer';
-
+import { requireActiveEmpresaLicense } from "../middlewares/licencia.middleware.js";
 
 
 const router = Router();
@@ -214,7 +214,7 @@ async function resolveCompanyIdByDetalleId(detalleId) {
 const TABLA_EVENTOS = "Eventos"; 
 async function resolveCompanyIdByEventoId(eventoId) {
   const { data: evento, error: eventoError } = await supabase
-    .from("TABLA_EVENTOS")
+    .from(TABLA_EVENTOS)
     .select("id, IdEvaluacionDetalle")
     .eq("id", eventoId)
     .maybeSingle();
@@ -374,15 +374,76 @@ async function resolveCompanyIdByEvaluacionId(evaluacionId) {
   return Number(evaluacion.IdEmpresa) || null;
 }
 
-/*#################### FIN HELPERS Y FUNCIONES GENERALES DE EVALUACIONES ##################### */
+/*#################### HELPERS DE LICENCIA POR EMPRESA #####################
 
+  Estos middlewares NO cambian la lógica de los endpoints.
+  Solo validan que la empresa tenga licencia activa antes de permitir
+  consultar/editar información de evaluación.
+
+  Regla:
+  - SUPER_ADMIN pasa siempre, aunque la licencia esté vencida.
+  - Usuarios de empresa necesitan licencia activa.
+
+######################################################################*/
+
+const licenciaByCompanyIdQuery = requireActiveEmpresaLicense((req) =>
+  toInt(req.query.companyId)
+);
+
+const licenciaByCompanyIdBody = requireActiveEmpresaLicense((req) =>
+  toInt(req.body?.companyId)
+);
+
+const licenciaByDetalleId = requireActiveEmpresaLicense(async (req) => {
+  const detalleId = toInt(req.params.detalleId);
+  if (!detalleId || detalleId <= 0) return null;
+
+  return resolveCompanyIdByDetalleId(detalleId);
+});
+
+const licenciaByEvidenceId = requireActiveEmpresaLicense(async (req) => {
+  const evidenceId = toInt(req.params.id);
+  if (!evidenceId || evidenceId <= 0) return null;
+
+  return resolveCompanyIdByEvidenceId(evidenceId);
+});
+
+const licenciaByEventoId = requireActiveEmpresaLicense(async (req) => {
+  const eventoId = toInt(req.params.id);
+  if (!eventoId || eventoId <= 0) return null;
+
+  return resolveCompanyIdByEventoId(eventoId);
+});
+
+const licenciaByRequisitoResponsableId = requireActiveEmpresaLicense(
+  async (req) => {
+    const relacionId = toInt(req.params.id);
+    if (!relacionId || relacionId <= 0) return null;
+
+    return resolveCompanyIdByRequisitoResponsableId(relacionId);
+  }
+);
+
+const licenciaByEvaluacionId = requireActiveEmpresaLicense(async (req) => {
+  const evaluacionId = toInt(req.params.evaluacionId);
+  if (!evaluacionId || evaluacionId <= 0) return null;
+
+  return resolveCompanyIdByEvaluacionId(evaluacionId);
+});
+
+/*#################### FIN HELPERS DE LICENCIA POR EMPRESA #####################*/
+
+
+/*#################### FIN HELPERS Y FUNCIONES GENERALES DE EVALUACIONES ##################### */
 
 
 /**
  * GET /api/evaluaciones/actual?companyId=1
  * Devuelve la evaluación más reciente de la empresa o null
  */
-router.get("/actual",requireAuth,authorizeEmpresaAccess({requiredPermissions: ["EVALUACIONES_VER"], resolveEmpresaId: async (req) => toInt(req.query.companyId),}), async (req, res) => {
+router.get("/actual",requireAuth,authorizeEmpresaAccess({requiredPermissions: ["EVALUACIONES_VER"], resolveEmpresaId: async (req) => toInt(req.query.companyId),}),
+licenciaByCompanyIdQuery,
+async (req, res) => {
     try {
       const companyId = toInt(req.query.companyId);
 
@@ -429,9 +490,10 @@ router.post(
   "/iniciar",
   requireAuth,
   authorizeEmpresaAccess({
-    requiredPermissions: ["EVALUACIONES_EDITAR"],
-    resolveEmpresaId: async (req) => toInt(req.body?.companyId),
+  requiredPermissions: ["EVALUACIONES_EDITAR"],
+  resolveEmpresaId: async (req) => toInt(req.body?.companyId),
   }),
+  licenciaByCompanyIdBody,
   async (req, res) => {
     try {
       const { companyId, mode, requisitosIds } = req.body || {};
@@ -655,6 +717,7 @@ router.get(
     requiredPermissions: ["EVALUACIONES_VER"],
     resolveEmpresaId: async (req) => toInt(req.query.companyId),
   }),
+  licenciaByCompanyIdQuery,
   async (req, res) => {
     const requestId = `dash-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
@@ -897,13 +960,14 @@ router.put(
   "/detalle/:detalleId/estado",
   requireAuth,
   authorizeEmpresaAccess({
-    requiredPermissions: ["REQUISITOS_ESTADO_EDITAR"],
+  requiredPermissions: ["REQUISITOS_ESTADO_EDITAR"],
     resolveEmpresaId: async (req) => {
       const detalleId = toInt(req.params.detalleId);
       if (!detalleId || detalleId <= 0) return null;
       return resolveCompanyIdByDetalleId(detalleId);
     },
   }),
+  licenciaByDetalleId,
   async (req, res) => {
     try {
       const detalleId = Number(req.params.detalleId);
@@ -1021,6 +1085,7 @@ router.get(
       return resolveCompanyIdByDetalleId(detalleId);
     },
   }),
+  licenciaByDetalleId,
   async (req, res) => {
     try {
       const detalleId = toInt(req.params.detalleId);
@@ -1071,6 +1136,7 @@ router.post(
       return resolveCompanyIdByDetalleId(detalleId);
     },
   }),
+  licenciaByDetalleId,
   uploadEvidence.array("documentos", 10),
   async (req, res) => {
     try {
@@ -1192,6 +1258,7 @@ router.get(
       return resolveCompanyIdByEvidenceId(evidenceId);
     },
   }),
+  licenciaByEvidenceId,
   async (req, res) => {
     try {
       const id = toInt(req.params.id);
@@ -1272,6 +1339,7 @@ router.delete(
       return resolveCompanyIdByEvidenceId(evidenceId);
     },
   }),
+  licenciaByEvidenceId,
   async (req, res) => {
     try {
       const id = toInt(req.params.id);
@@ -1332,6 +1400,7 @@ router.get(
       return resolveCompanyIdByDetalleId(detalleId);
     },
   }),
+  licenciaByDetalleId,
   async (req, res) => {
     try {
       const detalleId = toInt(req.params.detalleId);
@@ -1419,6 +1488,7 @@ router.post(
       return resolveCompanyIdByDetalleId(detalleId);
     },
   }),
+  licenciaByDetalleId,
   async (req, res) => {
     try {
       const detalleId = toInt(req.params.detalleId);
@@ -1544,6 +1614,7 @@ router.delete(
       return resolveCompanyIdByEventoId(eventoId);
     },
   }),
+  licenciaByEventoId,
   async (req, res) => {
     try {
       const id = toInt(req.params.id);
@@ -1604,6 +1675,7 @@ router.get(
       return resolveCompanyIdByDetalleId(detalleId);
     },
   }),
+  licenciaByDetalleId,
   async (req, res) => {
     try {
       const detalleId = toInt(req.params.detalleId);
@@ -1658,6 +1730,7 @@ router.post(
       return resolveCompanyIdByDetalleId(detalleId);
     },
   }),
+  licenciaByDetalleId,
   async (req, res) => {
     try {
       const detalleId = toInt(req.params.detalleId);
@@ -1793,6 +1866,7 @@ router.get(
       return resolveCompanyIdByDetalleId(detalleId);
     },
   }),
+  licenciaByDetalleId,
   async (req, res) => {
     try {
       const detalleId = toInt(req.params.detalleId);
@@ -1876,6 +1950,7 @@ router.get(
       return resolveCompanyIdByDetalleId(detalleId);
     },
   }),
+  licenciaByDetalleId,
   async (req, res) => {
     try {
       const detalleId = toInt(req.params.detalleId);
@@ -1940,6 +2015,7 @@ router.post(
       return resolveCompanyIdByDetalleId(detalleId);
     },
   }),
+  licenciaByDetalleId,
   async (req, res) => {
     try {
       const detalleId = toInt(req.params.detalleId);
@@ -2100,6 +2176,7 @@ router.delete(
       return resolveCompanyIdByRequisitoResponsableId(relacionId);
     },
   }),
+  licenciaByRequisitoResponsableId,
   async (req, res) => {
     try {
       const id = toInt(req.params.id);
@@ -2179,6 +2256,7 @@ router.get(
       return resolveCompanyIdByDetalleId(detalleId);
     },
   }),
+  licenciaByDetalleId,
   async (req, res) => {
     try {
       const detalleId = toInt(req.params.detalleId);
@@ -2241,6 +2319,7 @@ router.put(
       return resolveCompanyIdByDetalleId(detalleId);
     },
   }),
+  licenciaByDetalleId,
   async (req, res) => {
     try {
       const detalleId = toInt(req.params.detalleId);
@@ -2401,6 +2480,7 @@ router.put(
       return resolveCompanyIdByEvaluacionId(evaluacionId);
     },
   }),
+  licenciaByEvaluacionId,
   async (req, res) => {
     try {
       const evaluacionId = toInt(req.params.evaluacionId);

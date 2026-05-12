@@ -125,15 +125,39 @@ async function getEmpresasMapByIds(idsEmpresa) {
 
   if (uniqueIds.length === 0) return {};
 
-  const { data, error } = await supabase
-    .from("Empresas")
-    .select('id, "Nombre", "Estado"')
-    .in("id", uniqueIds);
+  const [{ data, error }, licenciasMap] = await Promise.all([
+    supabase
+      .from("Empresas")
+      .select('id, "Nombre", "Estado"')
+      .in("id", uniqueIds),
+
+    getLicenciasMapByEmpresaIds(uniqueIds),
+  ]);
 
   if (error) throw error;
 
-  return Object.fromEntries((data || []).map((row) => [Number(row.id), row]));
+  return Object.fromEntries(
+    (data || []).map((row) => {
+      const idEmpresa = Number(row.id);
+      const licencia = licenciasMap[idEmpresa] || null;
+
+      return [
+        idEmpresa,
+        {
+          ...row,
+
+          // ==================================================
+          // LICENCIAS DE EMPRESA
+          // Se agrega al objeto Empresa para que el frontend
+          // pueda mostrar si el usuario podrá ingresar o no.
+          // ==================================================
+          Licencia: buildLicenciaInfo(licencia),
+        },
+      ];
+    })
+  );
 }
+
 
 async function getRolesMapByIds(idsRol) {
   const uniqueIds = [...new Set((idsRol || []).filter(Boolean).map(Number))];
@@ -149,6 +173,123 @@ async function getRolesMapByIds(idsRol) {
 
   return Object.fromEntries((data || []).map((row) => [Number(row.IdRol), row]));
 }
+
+
+/**
+ * ============================================================
+ * LICENCIAS DE EMPRESA
+ * Helpers para mostrar el estado de licencia dentro del
+ * mantenimiento de usuarios.
+ *
+ * Importante:
+ * - La licencia pertenece a la empresa, no al usuario.
+ * - Aquí solo enriquecemos la respuesta para administración.
+ * - No bloqueamos estas rutas por licencia, porque SUPER_ADMIN
+ *   necesita administrar empresas aunque estén vencidas.
+ * ============================================================
+ */
+
+function getTodayDateOnly() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function calcularEstadoLicencia(licencia) {
+  if (!licencia) return "SIN_LICENCIA";
+
+  const today = getTodayDateOnly();
+
+  if (licencia.Estado !== "ACTIVA") {
+    return licencia.Estado || "SIN_LICENCIA";
+  }
+
+  if (licencia.FechaInicio && licencia.FechaInicio > today) {
+    return "PENDIENTE";
+  }
+
+  if (licencia.FechaFin && licencia.FechaFin < today) {
+    return "VENCIDA";
+  }
+
+  return "ACTIVA";
+}
+
+function calcularDiasRestantes(fechaFin) {
+  if (!fechaFin) return null;
+
+  const today = new Date(`${getTodayDateOnly()}T00:00:00.000Z`);
+  const end = new Date(`${fechaFin}T00:00:00.000Z`);
+
+  if (Number.isNaN(end.getTime())) return null;
+
+  const diffMs = end.getTime() - today.getTime();
+  const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+  return Math.max(diffDays, 0);
+}
+
+function buildLicenciaInfo(licencia) {
+  const estadoCalculado = calcularEstadoLicencia(licencia);
+
+  if (!licencia) {
+    return {
+      id: null,
+      idEmpresa: null,
+      fechaInicio: null,
+      fechaFin: null,
+      estado: "SIN_LICENCIA",
+      estadoCalculado,
+      tipoLicencia: null,
+      maxUsuarios: null,
+      diasRestantes: 0,
+      puedeAcceder: false,
+    };
+  }
+
+  return {
+    id: Number(licencia.id),
+    idEmpresa: Number(licencia.IdEmpresa),
+    fechaInicio: licencia.FechaInicio || null,
+    fechaFin: licencia.FechaFin || null,
+    estado: licencia.Estado || null,
+    estadoCalculado,
+    tipoLicencia: licencia.TipoLicencia || null,
+    maxUsuarios: licencia.MaxUsuarios ?? null,
+    diasRestantes: calcularDiasRestantes(licencia.FechaFin),
+    puedeAcceder: estadoCalculado === "ACTIVA",
+  };
+}
+
+async function getLicenciasMapByEmpresaIds(idsEmpresa) {
+  const uniqueIds = [...new Set((idsEmpresa || []).filter(Boolean).map(Number))];
+
+  if (uniqueIds.length === 0) return {};
+
+  const { data, error } = await supabase
+    .from("EmpresaLicencia")
+    .select(
+      'id, "IdEmpresa", "FechaInicio", "FechaFin", "Estado", "TipoLicencia", "MaxUsuarios"'
+    )
+    .in("IdEmpresa", uniqueIds)
+    .order("FechaFin", { ascending: false })
+    .order("id", { ascending: false });
+
+  if (error) throw error;
+
+  const map = {};
+
+  for (const licencia of data || []) {
+    const idEmpresa = Number(licencia.IdEmpresa);
+
+    // Tomamos solo la licencia más reciente por empresa.
+    if (!map[idEmpresa]) {
+      map[idEmpresa] = licencia;
+    }
+  }
+
+  return map;
+}
+
+
 
 /**
  * ============================================================
