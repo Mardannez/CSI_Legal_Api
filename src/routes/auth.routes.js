@@ -4,6 +4,8 @@ import jwt from "jsonwebtoken";
 import { z } from "zod";
 import { supabase } from "../lib/supabase.js";
 import { requireAuth } from "../middlewares/auth.middleware.js";
+import {getActiveLicensesByEmpresaIds, buildLicenseMap,} from "../helpers/licencias.helper.js";
+
 
 const router = Router();
 
@@ -36,11 +38,77 @@ router.post("/login", async (req, res) => {
       return res.status(401).json({ message: "Credenciales inválidas" });
     }
 
-    const token = jwt.sign(
-      { sub: user.id, usuario: user.Usuario },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN || "1h" }
-    );
+    // ==========================================================
+    // LICENCIAS DE EMPRESA
+    // Primero validamos si el usuario es SUPER_ADMIN.
+    // El SUPER_ADMIN puede entrar aunque las licencias de empresas
+    // estén vencidas, suspendidas o no existan.
+    // ==========================================================
+    const { data: isGlobalAdminData, error: isGlobalAdminError } =
+      await supabase.rpc("fn_es_admin_global", {
+        p_id_usuario: user.id,
+      });
+
+    if (isGlobalAdminError) {
+      throw isGlobalAdminError;
+    }
+
+    const isGlobalAdmin = isGlobalAdminData === true;
+
+    // ==========================================================
+    // LICENCIAS DE EMPRESA
+    // Para usuarios NO globales, validamos que al menos una empresa
+    // relacionada tenga licencia activa.
+    // ==========================================================
+    if (!isGlobalAdmin) {
+      const { data: usuarioEmpresas, error: usuarioEmpresasError } = await supabase
+        .from("UsuarioEmpresa")
+        .select("IdEmpresa")
+        .eq("IdUsuario", user.id)
+        .eq("Estado", 1);
+
+      if (usuarioEmpresasError) {
+        throw usuarioEmpresasError;
+      }
+
+      const empresaIds = [
+        ...new Set(
+          (usuarioEmpresas || [])
+            .map((x) => Number(x.IdEmpresa))
+            .filter(Boolean)
+        ),
+      ];
+
+      if (empresaIds.length === 0) {
+        return res.status(403).json({
+          ok: false,
+          code: "USER_WITHOUT_COMPANY",
+          message:
+            "El usuario no tiene empresas activas asignadas. Contacte al administrador.",
+        });
+      }
+
+      const licenciasActivas = await getActiveLicensesByEmpresaIds(empresaIds);
+
+      if (licenciasActivas.length === 0) {
+        return res.status(403).json({
+          ok: false,
+          code: "LICENSE_EXPIRED",
+          message:
+            "La licencia de la empresa ha vencido. Para continuar usando CSI Legal, debe renovar su licencia.",
+        });
+      }
+    }
+
+      const token = jwt.sign(
+        {
+          sub: user.id,
+          usuario: user.Usuario,
+          isGlobalAdmin,
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: process.env.JWT_EXPIRES_IN || "1h" }
+      );
 
     return res.json({
       token,
@@ -190,41 +258,87 @@ router.get("/me", requireAuth, async (req, res) => {
     const empresaRoles = empresaRolesResult.data || [];
     const empresaPermisos = empresaPermsResult.data || [];
 
-    const empresas = usuarioEmpresas
-      .map((ue) => {
-        const idEmpresa = Number(ue.IdEmpresa);
-        const empresa = empresasMap.get(idEmpresa);
 
-        if (!empresa) return null;
+      // ==========================================================
+      // LICENCIAS DE EMPRESA
+      // Si el usuario NO es SUPER_ADMIN, validamos las licencias activas
+      // de sus empresas. El SUPER_ADMIN no depende de licencias.
+      // ==========================================================
+      let licenciasActivas = [];
+      let licenciasMap = new Map();
 
-        const pais = paisesMap.get(Number(empresa.IdPais));
+      if (!isGlobalAdmin) {
+        licenciasActivas = await getActiveLicensesByEmpresaIds(empresaIds);
+        licenciasMap = buildLicenseMap(licenciasActivas);
 
-        return {
-          idEmpresa,
-          nombre: empresa.Nombre,
-          idPais: empresa.IdPais ? Number(empresa.IdPais) : null,
-          pais: pais?.Pais ?? null,
-          esPrincipal: ue.EsPrincipal === true,
-          roles: uniqueSorted(
-            empresaRoles
-              .filter((r) => Number(r.IdEmpresa) === idEmpresa)
-              .map((r) => r.RolCodigo)
-          ),
-          permisos: uniqueSorted(
-            empresaPermisos
-              .filter((p) => Number(p.IdEmpresa) === idEmpresa)
-              .map((p) => p.PermisoCodigo)
-          ),
-        };
-      })
-      .filter(Boolean)
-      .sort((a, b) => {
-        if (a.esPrincipal === b.esPrincipal) {
-          return a.nombre.localeCompare(b.nombre);
+        if (licenciasActivas.length === 0) {
+          return res.status(403).json({
+            ok: false,
+            code: "LICENSE_EXPIRED",
+            message:
+              "La licencia de la empresa ha vencido. Para continuar usando CSI Legal, debe renovar su licencia.",
+          });
         }
-        return a.esPrincipal ? -1 : 1;
-      });
+      }
 
+        const empresas = usuarioEmpresas
+          .map((ue) => {
+            const idEmpresa = Number(ue.IdEmpresa);
+            const empresa = empresasMap.get(idEmpresa);
+
+            if (!empresa) return null;
+
+            const pais = paisesMap.get(Number(empresa.IdPais));
+            const licencia = licenciasMap.get(idEmpresa) || null;
+
+            return {
+              idEmpresa,
+              nombre: empresa.Nombre,
+              idPais: empresa.IdPais ? Number(empresa.IdPais) : null,
+              pais: pais?.Pais ?? null,
+              esPrincipal: ue.EsPrincipal === true,
+
+              // ========================================================
+              // LICENCIAS DE EMPRESA
+              // SUPER_ADMIN no depende de licencia.
+              // Usuarios de empresa solo reciben empresas con licencia activa.
+              // ========================================================
+              licencia: licencia
+                ? {
+                    id: Number(licencia.id),
+                    fechaInicio: licencia.FechaInicio,
+                    fechaFin: licencia.FechaFin,
+                    estado: licencia.Estado,
+                    tipoLicencia: licencia.TipoLicencia || null,
+                    maxUsuarios: licencia.MaxUsuarios ?? null,
+                  }
+                : null,
+
+              roles: uniqueSorted(
+                empresaRoles
+                  .filter((r) => Number(r.IdEmpresa) === idEmpresa)
+                  .map((r) => r.RolCodigo)
+              ),
+              permisos: uniqueSorted(
+                empresaPermisos
+                  .filter((p) => Number(p.IdEmpresa) === idEmpresa)
+                  .map((p) => p.PermisoCodigo)
+              ),
+            };
+          })
+          .filter(Boolean)
+          .filter((empresa) => {
+            if (isGlobalAdmin) return true;
+            return licenciasMap.has(Number(empresa.idEmpresa));
+          })
+          .sort((a, b) => {
+            if (a.esPrincipal === b.esPrincipal) {
+              return a.nombre.localeCompare(b.nombre);
+            }
+
+            return a.esPrincipal ? -1 : 1;
+          });
+   
     const empresaPrincipal =
       empresas.find((e) => e.esPrincipal) || empresas[0] || null;
 
