@@ -18,6 +18,10 @@ import usuariosRoutes from "./routes/usuarios.routes.js";
 import rolesRoutes from "./routes/roles.routes.js";
 import permisosRoutes from "./routes/permisos.routes.js";
 import licenciasRoutes from "./routes/licencias.routes.js";
+import swaggerUi from 'swagger-ui-express';
+import swaggerSpec from '../config/swagger.js';
+
+
 
 
 const app = express();
@@ -42,6 +46,22 @@ const authLimiter = rateLimit({
 });
 
 app.use(express.json());
+
+// Swagger Docs
+// En local siempre estará activo.
+// En producción solo se activa si SWAGGER_ENABLED=true
+// Swagger
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  explorer: true,
+}));
+
+app.get('/swagger.json', (req, res) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.send(swaggerSpec);
+});
+console.log('Swagger paths:', Object.keys(swaggerSpec.paths || {}));
+
+
 app.get('/', (req, res) => {
   res.json({ message: 'CSI Legal API funcionando' });
 });

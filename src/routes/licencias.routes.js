@@ -5,6 +5,13 @@ import { authorizeGlobalPermission } from "../middlewares/authorizeGlobalPermiss
 
 const router = Router();
 
+/**
+ * @swagger
+ * tags:
+ *   - name: Licencias
+ *     description: Administracion de licencias de empresa
+ */
+
 // ==========================================================
 // LICENCIAS - CONSTANTES
 // Estas rutas son administrativas y deben ser usadas solo por
@@ -266,6 +273,25 @@ function validateLicenciaPayload(body = {}, options = {}) {
 // GET /api/licencias/catalogos
 // Catálogos simples para combos del frontend.
 // ============================================================
+/**
+ * @swagger
+ * /api/licencias/catalogos:
+ *   get:
+ *     summary: Obtener catalogos de licencias
+ *     tags: [Licencias]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters: []
+ *     responses:
+ *       200:
+ *         description: Catalogos consultados
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.get(
   "/catalogos",
   requireAuth,
@@ -288,6 +314,45 @@ router.get(
 // - page
 // - pageSize
 // ============================================================
+/**
+ * @swagger
+ * /api/licencias:
+ *   get:
+ *     summary: Listar empresas con su licencia mas reciente
+ *     tags: [Licencias]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: q
+ *         required: false
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: estadoLicencia
+ *         required: false
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: page
+ *         required: false
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: pageSize
+ *         required: false
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Licencias consultadas
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.get(
   "/",
   requireAuth,
@@ -387,6 +452,34 @@ router.get(
 // GET /api/licencias/empresa/:idEmpresa
 // Devuelve detalle de empresa e historial completo de licencias.
 // ============================================================
+/**
+ * @swagger
+ * /api/licencias/empresa/{idEmpresa}:
+ *   get:
+ *     summary: Obtener historial de licencias de una empresa
+ *     tags: [Licencias]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: idEmpresa
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Licencia de empresa consultada
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.get(
   "/empresa/:idEmpresa",
   requireAuth,
@@ -434,6 +527,34 @@ router.get(
 // Crea una nueva licencia para una empresa.
 // Se usa para crear primera licencia o renovar generando un nuevo registro.
 // ============================================================
+/**
+ * @swagger
+ * /api/licencias/empresa/{idEmpresa}:
+ *   post:
+ *     summary: Crear una licencia para una empresa
+ *     tags: [Licencias]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: idEmpresa
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       201:
+ *         description: Licencia creada
+ *       400:
+ *         description: Datos invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.post(
   "/empresa/:idEmpresa",
   requireAuth,
@@ -503,6 +624,34 @@ router.post(
 // Edita una licencia existente.
 // Útil para corregir fechas, monto, maxUsuarios o referencia de pago.
 // ============================================================
+/**
+ * @swagger
+ * /api/licencias/{id}:
+ *   put:
+ *     summary: Actualizar una licencia
+ *     tags: [Licencias]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Licencia actualizada
+ *       400:
+ *         description: Datos invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.put(
   "/:id",
   requireAuth,
@@ -567,6 +716,34 @@ router.put(
 // PATCH /api/licencias/:id/suspender
 // Suspende una licencia manualmente.
 // ============================================================
+/**
+ * @swagger
+ * /api/licencias/{id}/suspender:
+ *   patch:
+ *     summary: Suspender una licencia
+ *     tags: [Licencias]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Licencia suspendida
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.patch(
   "/:id/suspender",
   requireAuth,
@@ -626,6 +803,34 @@ router.patch(
 // PATCH /api/licencias/:id/cancelar
 // Cancela una licencia manualmente.
 // ============================================================
+/**
+ * @swagger
+ * /api/licencias/{id}/cancelar:
+ *   patch:
+ *     summary: Cancelar una licencia
+ *     tags: [Licencias]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Licencia cancelada
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.patch(
   "/:id/cancelar",
   requireAuth,

@@ -62,6 +62,99 @@ async function getUserScope(userId) {
  * GET /api/paises
  * Lista de países visibles para el usuario logueado
  */
+
+/**
+ * @swagger
+ * /api/paises:
+ *   get:
+ *     summary: Obtener listado de países disponibles
+ *     description: >
+ *       Retorna el listado de países disponibles para el usuario autenticado.
+ *       Si el usuario es SUPER_ADMIN, devuelve todos los países registrados.
+ *       Si el usuario pertenece a empresas específicas, devuelve únicamente
+ *       los países relacionados a sus empresas asignadas y recalcula el
+ *       CompanyCount según su alcance.
+ *     tags:
+ *       - Paises
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Listado de países obtenido correctamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 Paises:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: integer
+ *                         example: 1
+ *                       Pais:
+ *                         type: string
+ *                         example: Honduras
+ *                       Bandera:
+ *                         type: string
+ *                         nullable: true
+ *                         example: hn
+ *                       DescripcionActividades:
+ *                         type: string
+ *                         nullable: true
+ *                         example: Actividades legales y regulatorias aplicables en Honduras
+ *                       CompanyCount:
+ *                         type: integer
+ *                         example: 3
+ *             examples:
+ *               superAdmin:
+ *                 summary: Respuesta para SUPER_ADMIN
+ *                 value:
+ *                   Paises:
+ *                     - id: 1
+ *                       Pais: Honduras
+ *                       Bandera: hn
+ *                       DescripcionActividades: Actividades legales y regulatorias aplicables en Honduras
+ *                       CompanyCount: 5
+ *                     - id: 2
+ *                       Pais: Guatemala
+ *                       Bandera: gt
+ *                       DescripcionActividades: Actividades legales y regulatorias aplicables en Guatemala
+ *                       CompanyCount: 2
+ *               usuarioSinEmpresas:
+ *                 summary: Usuario sin empresas asignadas
+ *                 value:
+ *                   Paises: []
+ *       401:
+ *         description: Token no enviado, inválido o expirado
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 ok:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Token no enviado o inválido
+ *       500:
+ *         description: Error interno consultando países o empresas asignadas
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: Error consultando países
+ *                 detail:
+ *                   type: string
+ *                   nullable: true
+ *                   example: Error de conexión con Supabase
+ */
 router.get("/", requireAuth, async (req, res) => {
   try {
     const userId = req.user.id;

@@ -8,6 +8,169 @@ import { requireActiveEmpresaLicense } from "../middlewares/licencia.middleware.
 
 const router = Router();
 
+/**
+ * @swagger
+ * tags:
+ *   - name: Evaluaciones
+ *     description: Endpoints para evaluaciones, detalles, evidencias, eventos y responsables
+ *
+ * components:
+ *   schemas:
+ *     EvaluacionDashboardItem:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: integer
+ *           example: 10
+ *         evaluacionId:
+ *           type: integer
+ *           example: 3
+ *         requisitoId:
+ *           type: integer
+ *           example: 25
+ *         name:
+ *           type: string
+ *           example: Licencia ambiental vigente
+ *         description:
+ *           type: string
+ *           example: Requisito legal aplicable a la empresa
+ *         estadoId:
+ *           type: integer
+ *           example: 1
+ *         status:
+ *           type: string
+ *           example: Cumplido
+ *         responsible:
+ *           type: string
+ *           example: Maria Lopez
+ *         responsable:
+ *           type: string
+ *           nullable: true
+ *           example: Maria Lopez
+ *         plannedDate:
+ *           type: string
+ *           format: date
+ *           nullable: true
+ *           example: "2026-06-15"
+ *         fechaPlanificada:
+ *           type: string
+ *           format: date
+ *           nullable: true
+ *           example: "2026-06-15"
+ *         idPeriocidad:
+ *           type: integer
+ *           nullable: true
+ *           example: 2
+ *         periodicity:
+ *           type: string
+ *           example: Anual
+ *         periocidad:
+ *           type: string
+ *           nullable: true
+ *           example: Anual
+ *         lastUpdate:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *         ultimaActualizacion:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *     EvaluacionDashboardResponse:
+ *       type: object
+ *       properties:
+ *         hasEvaluation:
+ *           type: boolean
+ *           example: true
+ *         Evaluacion:
+ *           type: object
+ *           nullable: true
+ *         Chart:
+ *           type: array
+ *           items:
+ *             type: object
+ *             properties:
+ *               id:
+ *                 type: integer
+ *                 example: 1
+ *               name:
+ *                 type: string
+ *                 example: Cumplido
+ *               value:
+ *                 type: integer
+ *                 example: 12
+ *         Items:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/EvaluacionDashboardItem'
+ *         Totals:
+ *           type: object
+ *           properties:
+ *             total:
+ *               type: integer
+ *               example: 42
+ *     EvaluacionDetalleInformacion:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: integer
+ *           example: 10
+ *         evaluacionId:
+ *           type: integer
+ *           example: 3
+ *         requisitoId:
+ *           type: integer
+ *           example: 25
+ *         name:
+ *           type: string
+ *           example: Licencia ambiental vigente
+ *         description:
+ *           type: string
+ *           example: Requisito legal aplicable a la empresa
+ *         estadoId:
+ *           type: integer
+ *           example: 1
+ *         status:
+ *           type: string
+ *           example: Cumplido
+ *         fechaPlanificada:
+ *           type: string
+ *           format: date
+ *           nullable: true
+ *           example: "2026-06-15"
+ *         responsible:
+ *           type: string
+ *           example: Maria Lopez
+ *         idPeriocidad:
+ *           type: integer
+ *           nullable: true
+ *           example: 2
+ *         periodicity:
+ *           type: string
+ *           example: Anual
+ *         fechaRegistro:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *         UltimaActualizacion:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *         lastUpdate:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *         responsableCatalogo:
+ *           type: string
+ *           nullable: true
+ *           example: Encargado legal
+ *     EvaluacionDetalleInformacionResponse:
+ *       type: object
+ *       properties:
+ *         Informacion:
+ *           $ref: '#/components/schemas/EvaluacionDetalleInformacion'
+ */
+
 function toInt(v) {
   if (v === undefined || v === null || v === "") return null;
   const n = Number(v);
@@ -288,6 +451,87 @@ function normalizeDateOnly(value) {
   return date.toISOString().slice(0, 10);
 }
 
+function normalizeStrictDateOnly(value) {
+  if (!value) return null;
+
+  const raw = value.toString().trim();
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return null;
+  }
+
+  const date = new Date(`${raw}T00:00:00.000Z`);
+
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return date.toISOString().slice(0, 10) === raw ? raw : null;
+}
+
+function getProximoEventoFromBody(body = {}) {
+  const hasPascal = Object.prototype.hasOwnProperty.call(body, "ProximoEvento");
+  const hasCamel = Object.prototype.hasOwnProperty.call(body, "proximoEvento");
+
+  if (hasPascal && hasCamel && body.ProximoEvento !== body.proximoEvento) {
+    return {
+      value: null,
+      error: "ProximoEvento y proximoEvento deben tener el mismo valor",
+    };
+  }
+
+  const rawValue = hasPascal ? body.ProximoEvento : body.proximoEvento;
+  const value = normalizeStrictDateOnly(rawValue);
+
+  if (!value) {
+    return {
+      value: null,
+      error: "ProximoEvento es requerido y debe tener formato YYYY-MM-DD",
+    };
+  }
+
+  return { value, error: null };
+}
+
+function requireSuperOrAdminGlobal(req, res, next) {
+  const userId = toInt(req.user?.id);
+
+  if (!userId || userId <= 0) {
+    return res.status(401).json({
+      ok: false,
+      message: "No autenticado",
+    });
+  }
+
+  return supabase
+    .from("vw_UsuarioRolesGlobales")
+    .select("RolCodigo")
+    .eq("IdUsuario", userId)
+    .in("RolCodigo", ["SUPER_ADMIN", "ADMIN_GLOBAL"])
+    .limit(1)
+    .then(({ data, error }) => {
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        return res.status(403).json({
+          ok: false,
+          message:
+            "Solo usuarios SUPER_ADMIN o ADMIN_GLOBAL pueden actualizar ProximoEvento",
+        });
+      }
+
+      return next();
+    })
+    .catch((error) => {
+      console.error("requireSuperOrAdminGlobal error:", error);
+
+      return res.status(500).json({
+        ok: false,
+        message: "Error interno validando rol global",
+      });
+    });
+}
+
 async function buildDetalleInformacionResponse(detalle) {
   const { data: requisito, error: requisitoError } = await supabase
     .from("vw_RequisitoListado")
@@ -441,6 +685,32 @@ const licenciaByEvaluacionId = requireActiveEmpresaLicense(async (req) => {
  * GET /api/evaluaciones/actual?companyId=1
  * Devuelve la evaluación más reciente de la empresa o null
  */
+/**
+ * @swagger
+ * /api/evaluaciones/actual:
+ *   get:
+ *     summary: Obtener la evaluacion mas reciente de una empresa
+ *     tags: [Evaluaciones]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: companyId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Evaluacion encontrada o null
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.get("/actual",requireAuth,authorizeEmpresaAccess({requiredPermissions: ["EVALUACIONES_VER"], resolveEmpresaId: async (req) => toInt(req.query.companyId),}),
 licenciaByCompanyIdQuery,
 async (req, res) => {
@@ -485,6 +755,29 @@ async (req, res) => {
  *   mode: "all" | "selected",
  *   requisitosIds?: number[]
  * }
+ */
+/**
+ * @swagger
+ * /api/evaluaciones/iniciar:
+ *   post:
+ *     summary: Iniciar una evaluacion para una empresa
+ *     tags: [Evaluaciones]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters: []
+ *     responses:
+ *       201:
+ *         description: Evaluacion iniciada
+ *       400:
+ *         description: Datos invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       409:
+ *         description: Ya existe una evaluacion activa
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
  */
 router.post(
   "/iniciar",
@@ -709,6 +1002,36 @@ router.post(
 
 /**
  * GET /api/evaluaciones/dashboard?companyId=1
+ */
+/**
+ * @swagger
+ * /api/evaluaciones/dashboard:
+ *   get:
+ *     summary: Obtener dashboard de evaluacion por empresa
+ *     tags: [Evaluaciones]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: companyId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Dashboard de evaluacion
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/EvaluacionDashboardResponse'
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
  */
 router.get(
   "/dashboard",
@@ -956,6 +1279,36 @@ router.get(
 /**
  * PUT /api/evaluaciones/detalle/:detalleId/estado
  */
+/**
+ * @swagger
+ * /api/evaluaciones/detalle/{detalleId}/estado:
+ *   put:
+ *     summary: Actualizar estado de un detalle de evaluacion
+ *     tags: [Evaluaciones]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: detalleId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Estado actualizado
+ *       400:
+ *         description: Datos invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       409:
+ *         description: La evaluacion no esta activa
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.put(
   "/detalle/:detalleId/estado",
   requireAuth,
@@ -970,15 +1323,15 @@ router.put(
   licenciaByDetalleId,
   async (req, res) => {
     try {
-      const detalleId = Number(req.params.detalleId);
+      const detalleId = toInt(req.params.detalleId);
       const { estadoId } = req.body || {};
-      const newEstadoId = Number(estadoId);
+      const newEstadoId = toInt(estadoId);
 
-      if (!Number.isInteger(detalleId) || detalleId <= 0) {
+      if (!detalleId || detalleId <= 0) {
         return res.status(400).json({ message: "detalleId inválido" });
       }
 
-      if (!Number.isInteger(newEstadoId) || newEstadoId <= 0) {
+      if (!newEstadoId || newEstadoId <= 0) {
         return res.status(400).json({ message: "estadoId inválido" });
       }
 
@@ -1005,7 +1358,7 @@ router.put(
         .from("EvaluacionDetalle")
         .select('id, "IdEvaluacionEncabezado", "IdEstadoRequisito"')
         .eq("id", detalleId)
-        .order("id", { ascending: true });
+        .maybeSingle();
 
       if (detErr) {
         return res.status(500).json({
@@ -1074,6 +1427,32 @@ router.put(
 
 /* #################### Subir evidencias a una evaluacion de una empresa ######################### */
 
+/**
+ * @swagger
+ * /api/evaluaciones/detalle/{detalleId}/evidencias:
+ *   get:
+ *     summary: Listar evidencias de un detalle de evaluacion
+ *     tags: [Evaluaciones]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: detalleId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Evidencias consultadas
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.get(
   "/detalle/:detalleId/evidencias",
   requireAuth,
@@ -1125,6 +1504,34 @@ router.get(
   }
 );
 
+/**
+ * @swagger
+ * /api/evaluaciones/detalle/{detalleId}/evidencias:
+ *   post:
+ *     summary: Subir evidencias a un detalle de evaluacion
+ *     tags: [Evaluaciones]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: detalleId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       201:
+ *         description: Evidencias cargadas
+ *       400:
+ *         description: Datos invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.post(
   "/detalle/:detalleId/evidencias",
   requireAuth,
@@ -1247,6 +1654,34 @@ router.post(
   }
 );
 
+/**
+ * @swagger
+ * /api/evaluaciones/evidencias/{id}/download:
+ *   get:
+ *     summary: Descargar una evidencia
+ *     tags: [Evaluaciones]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Archivo de evidencia
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.get(
   "/evidencias/:id/download",
   requireAuth,
@@ -1328,6 +1763,34 @@ router.get(
 );
 
 
+/**
+ * @swagger
+ * /api/evaluaciones/evidencias/{id}:
+ *   delete:
+ *     summary: Eliminar una evidencia
+ *     tags: [Evaluaciones]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Evidencia eliminada
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.delete(
   "/evidencias/:id",
   requireAuth,
@@ -1389,6 +1852,32 @@ router.delete(
 
 /* #################### Agregando los Eventos y relacionaodo con evidencias ################ */
 
+/**
+ * @swagger
+ * /api/evaluaciones/detalle/{detalleId}/eventos:
+ *   get:
+ *     summary: Listar eventos de un detalle de evaluacion
+ *     tags: [Evaluaciones]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: detalleId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Eventos consultados
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.get(
   "/detalle/:detalleId/eventos",
   requireAuth,
@@ -1477,6 +1966,34 @@ router.get(
   }
 );
 
+/**
+ * @swagger
+ * /api/evaluaciones/detalle/{detalleId}/eventos:
+ *   post:
+ *     summary: Crear evento para un detalle de evaluacion
+ *     tags: [Evaluaciones]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: detalleId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       201:
+ *         description: Evento creado
+ *       400:
+ *         description: Datos invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.post(
   "/detalle/:detalleId/eventos",
   requireAuth,
@@ -1603,6 +2120,34 @@ router.post(
   }
 );
 
+/**
+ * @swagger
+ * /api/evaluaciones/eventos/{id}:
+ *   delete:
+ *     summary: Eliminar evento
+ *     tags: [Evaluaciones]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Evento eliminado
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.delete(
   "/eventos/:id",
   requireAuth,
@@ -1664,6 +2209,37 @@ router.delete(
 
 /*###################  Agregando los responsables en evaluacion detalle ####################### */
 
+/**
+ * @swagger
+ * /api/evaluaciones/detalle/{detalleId}/responsables/catalogo:
+ *   get:
+ *     summary: Listar catalogo de responsables
+ *     tags: [Evaluaciones]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: detalleId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: q
+ *         required: false
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Catalogo consultado
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.get(
   "/detalle/:detalleId/responsables/catalogo",
   requireAuth,
@@ -1719,6 +2295,36 @@ router.get(
   }
 );
 
+/**
+ * @swagger
+ * /api/evaluaciones/detalle/{detalleId}/responsables:
+ *   post:
+ *     summary: Asignar responsable a un detalle de evaluacion
+ *     tags: [Evaluaciones]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: detalleId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       201:
+ *         description: Responsable asignado
+ *       400:
+ *         description: Datos invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       409:
+ *         description: Responsable ya asignado
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.post(
   "/detalle/:detalleId/responsables",
   requireAuth,
@@ -1855,6 +2461,32 @@ router.post(
   }
 );
 
+/**
+ * @swagger
+ * /api/evaluaciones/detalle/{detalleId}/responsables:
+ *   get:
+ *     summary: Listar responsables asignados a un detalle
+ *     tags: [Evaluaciones]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: detalleId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Responsables asignados consultados
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.get(
   "/detalle/:detalleId/responsables",
   requireAuth,
@@ -1939,6 +2571,39 @@ router.get(
   }
 );
 
+/**
+ * @swagger
+ * /api/evaluaciones/detalle/{detalleId}/responsables/disponibles:
+ *   get:
+ *     summary: Listar responsables disponibles por empresa del detalle
+ *     tags: [Evaluaciones]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: detalleId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: q
+ *         required: false
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Responsables disponibles consultados
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.get(
   "/detalle/:detalleId/responsables/disponibles",
   requireAuth,
@@ -2004,6 +2669,36 @@ router.get(
 );
 
 
+/**
+ * @swagger
+ * /api/evaluaciones/detalle/{detalleId}/responsables/nuevo:
+ *   post:
+ *     summary: Crear y asignar responsable a un detalle
+ *     tags: [Evaluaciones]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: detalleId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       201:
+ *         description: Responsable creado y asignado
+ *       400:
+ *         description: Datos invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       409:
+ *         description: Responsable ya asignado
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.post(
   "/detalle/:detalleId/responsables/nuevo",
   requireAuth,
@@ -2165,6 +2860,34 @@ router.post(
   }
 );
 
+/**
+ * @swagger
+ * /api/evaluaciones/requisito-responsables/{id}:
+ *   delete:
+ *     summary: Desasignar responsable de un requisito evaluado
+ *     tags: [Evaluaciones]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Responsable desasignado
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.delete(
   "/requisito-responsables/:id",
   requireAuth,
@@ -2245,6 +2968,38 @@ router.delete(
  * - Descripción
  * - Estado
  */
+/**
+ * @swagger
+ * /api/evaluaciones/detalle/{detalleId}/informacion:
+ *   get:
+ *     summary: Obtener informacion editable de un detalle de evaluacion
+ *     tags: [Evaluaciones]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: detalleId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Informacion del detalle
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/EvaluacionDetalleInformacionResponse'
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.get(
   "/detalle/:detalleId/informacion",
   requireAuth,
@@ -2307,6 +3062,40 @@ router.get(
 /**
  * PUT /api/evaluaciones/detalle/:detalleId/informacion
  * Actualiza solamente información propia del detalle por empresa.
+ */
+/**
+ * @swagger
+ * /api/evaluaciones/detalle/{detalleId}/informacion:
+ *   put:
+ *     summary: Actualizar informacion editable de un detalle de evaluacion
+ *     tags: [Evaluaciones]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: detalleId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Informacion del detalle actualizada
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/EvaluacionDetalleInformacionResponse'
+ *       400:
+ *         description: Datos invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       409:
+ *         description: La evaluacion no esta activa
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
  */
 router.put(
   "/detalle/:detalleId/informacion",
@@ -2458,6 +3247,112 @@ router.put(
 
 /*#################  Fin Agregamos 2 enpoints para mejorar el campo de Informacion dentro del detalle de la evaluacion por requisito      #######################*/
 
+/**
+ * PUT /api/evaluaciones/:evaluacionId/proximo-evento
+ * Actualiza ProximoEvento del encabezado de evaluacion.
+ * Permitido solo para SUPER_ADMIN o ADMIN_GLOBAL.
+ */
+/**
+ * @swagger
+ * /api/evaluaciones/{evaluacionId}/proximo-evento:
+ *   put:
+ *     summary: Actualizar proximo evento de una evaluacion
+ *     tags: [Evaluaciones]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: evaluacionId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: ProximoEvento actualizado
+ *       400:
+ *         description: Datos invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
+router.put(
+  "/:evaluacionId/proximo-evento",
+  requireAuth,
+  requireSuperOrAdminGlobal,
+  async (req, res) => {
+    try {
+      const evaluacionId = toInt(req.params.evaluacionId);
+
+      if (!evaluacionId || evaluacionId <= 0) {
+        return res.status(400).json({
+          message: "evaluacionId invalido",
+        });
+      }
+
+      const { value: proximoEvento, error: proximoEventoError } =
+        getProximoEventoFromBody(req.body);
+
+      if (proximoEventoError) {
+        return res.status(400).json({
+          message: proximoEventoError,
+        });
+      }
+
+      const { data: evaluacion, error: evaluacionError } = await supabase
+        .from("EvaluacionEncabezado")
+        .select('id, "ProximoEvento"')
+        .eq("id", evaluacionId)
+        .maybeSingle();
+
+      if (evaluacionError) {
+        return res.status(500).json({
+          message: "Error consultando EvaluacionEncabezado",
+          detail: evaluacionError.message,
+        });
+      }
+
+      if (!evaluacion) {
+        return res.status(404).json({
+          message: "EvaluacionEncabezado no encontrado",
+        });
+      }
+
+      const { data: updated, error: updateError } = await supabase
+        .from("EvaluacionEncabezado")
+        .update({
+          ProximoEvento: proximoEvento,
+        })
+        .eq("id", evaluacionId)
+        .select("*")
+        .single();
+
+      if (updateError) {
+        return res.status(500).json({
+          message: "Error actualizando ProximoEvento",
+          detail: updateError.message,
+        });
+      }
+
+      return res.json({
+        message: "ProximoEvento actualizado correctamente",
+        Evaluacion: updated,
+      });
+    } catch (error) {
+      console.error("PUT /:evaluacionId/proximo-evento error:", error);
+
+      return res.status(500).json({
+        message: "Error interno actualizando ProximoEvento",
+        detail: error.message,
+      });
+    }
+  }
+);
+
 /*##################### Endpoint para guardar los cambios de evaluacion ##################### */
 
 /**
@@ -2468,6 +3363,36 @@ router.put(
  * - UltimaVerificacion
  * - UltimoHistorico
  * - ProximoEvento
+ */
+/**
+ * @swagger
+ * /api/evaluaciones/{evaluacionId}/guardar-cambios:
+ *   put:
+ *     summary: Guardar cambios resumen del encabezado de evaluacion
+ *     tags: [Evaluaciones]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: evaluacionId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Cambios guardados
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       409:
+ *         description: La evaluacion no esta activa
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
  */
 router.put(
   "/:evaluacionId/guardar-cambios",

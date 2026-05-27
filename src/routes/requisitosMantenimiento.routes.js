@@ -6,6 +6,13 @@ import multer from 'multer';
 
 const router = Router();
 
+/**
+ * @swagger
+ * tags:
+ *   - name: RequisitosMantenimiento
+ *     description: Mantenimiento de requisitos, referencias legales y leyes
+ */
+
 /*Para subir archivos con multer, de las leyes de requisitos legales */
 
 const upload = multer({
@@ -68,6 +75,55 @@ function toInt(v) {
  * GET /api/requisitos-mantenimiento?countryId=&estado=&q=&page=&pageSize=
  * Listado (usa vw_RequisitoMantenimiento)
  */
+/**
+ * @swagger
+ * /api/requisitos-mantenimiento:
+ *   get:
+ *     summary: Listar requisitos de mantenimiento
+ *     tags: [RequisitosMantenimiento]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: countryId
+ *         required: false
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: subCategoriaId
+ *         required: false
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: estado
+ *         required: false
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: q
+ *         required: false
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: page
+ *         required: false
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: pageSize
+ *         required: false
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Requisitos consultados
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.get("/",requireAuth,authorizeGlobalPermission(["REQUISITOS_MANTENIMIENTO_VER"]),
   async (req, res) => {
     try {
@@ -119,6 +175,34 @@ router.get("/",requireAuth,authorizeGlobalPermission(["REQUISITOS_MANTENIMIENTO_
 /**
  * GET /api/requisitos-mantenimiento/:id
  */
+/**
+ * @swagger
+ * /api/requisitos-mantenimiento/{id}:
+ *   get:
+ *     summary: Obtener requisito por id
+ *     tags: [RequisitosMantenimiento]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Requisito consultado
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.get("/:id",requireAuth,authorizeGlobalPermission(["REQUISITOS_MANTENIMIENTO_VER"]),
   async (req, res) => {
     try {
@@ -154,6 +238,27 @@ router.get("/:id",requireAuth,authorizeGlobalPermission(["REQUISITOS_MANTENIMIEN
 
 /**
  * POST /api/requisitos-mantenimiento
+ */
+/**
+ * @swagger
+ * /api/requisitos-mantenimiento:
+ *   post:
+ *     summary: Crear requisito de mantenimiento
+ *     tags: [RequisitosMantenimiento]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters: []
+ *     responses:
+ *       201:
+ *         description: Requisito creado
+ *       400:
+ *         description: Datos invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
  */
 router.post("/",requireAuth,authorizeGlobalPermission(["REQUISITOS_MANTENIMIENTO_CREAR"]),
   async (req, res) => {
@@ -220,6 +325,34 @@ router.post("/",requireAuth,authorizeGlobalPermission(["REQUISITOS_MANTENIMIENTO
 
 /**
  * PUT /api/requisitos-mantenimiento/:id
+ */
+/**
+ * @swagger
+ * /api/requisitos-mantenimiento/{id}:
+ *   put:
+ *     summary: Actualizar requisito de mantenimiento
+ *     tags: [RequisitosMantenimiento]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Requisito actualizado
+ *       400:
+ *         description: Datos invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
  */
 router.put("/:id",requireAuth,authorizeGlobalPermission(["REQUISITOS_MANTENIMIENTO_EDITAR"]),
   async (req, res) => {
@@ -292,6 +425,32 @@ router.put("/:id",requireAuth,authorizeGlobalPermission(["REQUISITOS_MANTENIMIEN
 /**
  * DELETE /api/requisitos-mantenimiento/:id
  */
+/**
+ * @swagger
+ * /api/requisitos-mantenimiento/{id}:
+ *   delete:
+ *     summary: Inactivar requisito de mantenimiento
+ *     tags: [RequisitosMantenimiento]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Requisito inactivado
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.delete("/:id",requireAuth,authorizeGlobalPermission(["REQUISITOS_MANTENIMIENTO_ELIMINAR"]),
   async (req, res) => {
     try {
@@ -331,6 +490,34 @@ router.delete("/:id",requireAuth,authorizeGlobalPermission(["REQUISITOS_MANTENIM
  * Guardar las referencias Legales de cada requisito.
  */
 
+/**
+ * @swagger
+ * /api/requisitos-mantenimiento/referencias-legales/{idReferenciaLegal}/leyes:
+ *   post:
+ *     summary: Cargar PDF de ley para una referencia legal
+ *     tags: [RequisitosMantenimiento]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: idReferenciaLegal
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       201:
+ *         description: Ley cargada
+ *       400:
+ *         description: Datos invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.post('/referencias-legales/:idReferenciaLegal/leyes', requireAuth,authorizeGlobalPermission(['REQUISITOS_MANTENIMIENTO_EDITAR']),
   upload.single('documento'),
   async (req, res) => {
@@ -423,6 +610,32 @@ router.post('/referencias-legales/:idReferenciaLegal/leyes', requireAuth,authori
  * GET /api/referencias-legales
  * Endpoint para listar leyes de una referencia legal
  */
+/**
+ * @swagger
+ * /api/requisitos-mantenimiento/referencias-legales/{idReferenciaLegal}/leyes:
+ *   get:
+ *     summary: Listar leyes de una referencia legal
+ *     tags: [RequisitosMantenimiento]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: idReferenciaLegal
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Leyes consultadas
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.get('/referencias-legales/:idReferenciaLegal/leyes',requireAuth,authorizeGlobalPermission(['REQUISITOS_MANTENIMIENTO_VER']),
   async (req, res) => {
     try {
@@ -466,6 +679,34 @@ router.get('/referencias-legales/:idReferenciaLegal/leyes',requireAuth,authorize
  * Endpoint para descargar el PDF
  */
 
+/**
+ * @swagger
+ * /api/requisitos-mantenimiento/leyes/{id}/download:
+ *   get:
+ *     summary: Descargar PDF de una ley
+ *     tags: [RequisitosMantenimiento]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: PDF de ley
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.get('/leyes/:id/download',requireAuth,authorizeGlobalPermission(['REQUISITOS_MANTENIMIENTO_VER']),
   async (req, res) => {
     try {
@@ -523,6 +764,34 @@ router.get('/leyes/:id/download',requireAuth,authorizeGlobalPermission(['REQUISI
  * Endpoint Eliminar una ley
  */
 
+/**
+ * @swagger
+ * /api/requisitos-mantenimiento/leyes/{id}:
+ *   delete:
+ *     summary: Eliminar ley
+ *     tags: [RequisitosMantenimiento]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Ley eliminada
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.delete('/leyes/:id',requireAuth, authorizeGlobalPermission(['REQUISITOS_MANTENIMIENTO_EDITAR']),
   async (req, res) => {
     try {
@@ -574,6 +843,34 @@ router.delete('/leyes/:id',requireAuth, authorizeGlobalPermission(['REQUISITOS_M
  * Crear una referencia Legal
  */
 
+/**
+ * @swagger
+ * /api/requisitos-mantenimiento/requisitos/{idRequisito}/referencias-legales:
+ *   post:
+ *     summary: Crear referencia legal para un requisito
+ *     tags: [RequisitosMantenimiento]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: idRequisito
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       201:
+ *         description: Referencia legal creada
+ *       400:
+ *         description: Datos invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.post('/requisitos/:idRequisito/referencias-legales',requireAuth,authorizeGlobalPermission(['REQUISITOS_MANTENIMIENTO_EDITAR']),
   async (req, res) => {
     try {
@@ -589,6 +886,7 @@ router.post('/requisitos/:idRequisito/referencias-legales',requireAuth,authorize
       const Articulo = (req.body?.Articulo || '').toString().trim();
       const Ley = (req.body?.Ley || '').toString().trim();
       const Modificaciones = (req.body?.Modificaciones || '').toString().trim();
+      const Contenido = (req.body?.Contenido ?? req.body?.contenido ?? '').toString().trim();
 
       if (!Ambito) {
         return res.status(400).json({ message: 'Ambito es requerido' });
@@ -630,6 +928,7 @@ router.post('/requisitos/:idRequisito/referencias-legales',requireAuth,authorize
           Articulo,
           Ley,
           Modificaciones: Modificaciones || null,
+          Contenido: Contenido || null,
           FechaRegistro: new Date().toISOString(),
         })
         .select('*')
@@ -661,6 +960,32 @@ router.post('/requisitos/:idRequisito/referencias-legales',requireAuth,authorize
  * Listar referencias legales por requisito
  */
 
+/**
+ * @swagger
+ * /api/requisitos-mantenimiento/requisitos/{idRequisito}/referencias-legales:
+ *   get:
+ *     summary: Listar referencias legales de un requisito
+ *     tags: [RequisitosMantenimiento]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: idRequisito
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Referencias legales consultadas
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.get('/requisitos/:idRequisito/referencias-legales',requireAuth,authorizeGlobalPermission(['REQUISITOS_MANTENIMIENTO_VER']),
   async (req, res) => {
     try {
@@ -702,6 +1027,34 @@ router.get('/requisitos/:idRequisito/referencias-legales',requireAuth,authorizeG
 /**
  * GET  '/referencias-legales/:id'
  * Obtener una referencia legal por id
+ */
+/**
+ * @swagger
+ * /api/requisitos-mantenimiento/referencias-legales/{id}:
+ *   get:
+ *     summary: Obtener referencia legal por id
+ *     tags: [RequisitosMantenimiento]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Referencia legal consultada
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
  */
 router.get('/referencias-legales/:id',requireAuth,authorizeGlobalPermission(['REQUISITOS_MANTENIMIENTO_VER']), async (req, res) => {
     try {
@@ -749,6 +1102,34 @@ router.get('/referencias-legales/:id',requireAuth,authorizeGlobalPermission(['RE
  * PUT  '/referencias-legales/:id'
  * Editar referencia legal
  */
+/**
+ * @swagger
+ * /api/requisitos-mantenimiento/referencias-legales/{id}:
+ *   put:
+ *     summary: Actualizar referencia legal
+ *     tags: [RequisitosMantenimiento]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Referencia legal actualizada
+ *       400:
+ *         description: Datos invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.put('/referencias-legales/:id',requireAuth,authorizeGlobalPermission(['REQUISITOS_MANTENIMIENTO_EDITAR']),  async (req, res) => {
     try {
       const id = toInt(req.params.id);
@@ -763,6 +1144,7 @@ router.put('/referencias-legales/:id',requireAuth,authorizeGlobalPermission(['RE
       const Articulo = (req.body?.Articulo || '').toString().trim();
       const Ley = (req.body?.Ley || '').toString().trim();
       const Modificaciones = (req.body?.Modificaciones || '').toString().trim();
+      const Contenido = (req.body?.Contenido ?? req.body?.contenido ?? '').toString().trim();
 
       if (!Ambito) {
         return res.status(400).json({ message: 'Ambito es requerido' });
@@ -783,6 +1165,7 @@ router.put('/referencias-legales/:id',requireAuth,authorizeGlobalPermission(['RE
           Articulo,
           Ley,
           Modificaciones: Modificaciones || null,
+          Contenido: Contenido || null,
         })
         .eq('id', id)
         .select('*')
@@ -821,6 +1204,36 @@ router.put('/referencias-legales/:id',requireAuth,authorizeGlobalPermission(['RE
  * Eliminar referencia legal
  */
 
+/**
+ * @swagger
+ * /api/requisitos-mantenimiento/referencias-legales/{id}:
+ *   delete:
+ *     summary: Eliminar referencia legal
+ *     tags: [RequisitosMantenimiento]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Referencia legal eliminada
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       409:
+ *         description: La referencia legal tiene leyes relacionadas
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.delete('/referencias-legales/:id',requireAuth,authorizeGlobalPermission(['REQUISITOS_MANTENIMIENTO_EDITAR']),  async (req, res) => {
     try {
       const id = toInt(req.params.id);

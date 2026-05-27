@@ -4,6 +4,30 @@ import { requireAuth } from "../middlewares/auth.middleware.js";
 
 const router = Router();
 
+/**
+ * @swagger
+ * tags:
+ *   - name: EstadosRequisito
+ *     description: Estados disponibles para requisitos evaluados
+ */
+
+/**
+ * @swagger
+ * /api/estados-requisito:
+ *   get:
+ *     summary: Listar estados de requisito
+ *     tags: [EstadosRequisito]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters: []
+ *     responses:
+ *       200:
+ *         description: Estados de requisito consultados
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.get("/", requireAuth, async (req, res) => {
   try {
     const { data, error } = await supabase
