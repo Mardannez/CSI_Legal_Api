@@ -62,6 +62,34 @@ async function getUserScope(userId) {
  * GET /api/empresas?paisId=1
  * Devuelve empresas visibles para el usuario logueado
  */
+/**
+ * @swagger
+ * /api/empresas:
+ *   get:
+ *     summary: Obtener listado de empresas disponibles
+ *     description: Retorna las empresas disponibles para el usuario autenticado. Puede filtrarse por país mediante paisId.
+ *     tags:
+ *       - Empresas
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: paisId
+ *         required: false
+ *         schema:
+ *           type: integer
+ *           example: 1
+ *         description: ID del país para filtrar las empresas. Debe ser un entero positivo.
+ *     responses:
+ *       200:
+ *         description: Listado de empresas obtenido correctamente
+ *       400:
+ *         description: Parámetro paisId inválido
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 router.get("/", requireAuth, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -120,6 +148,39 @@ router.get("/", requireAuth, async (req, res) => {
 /**
  * GET /api/empresas/:id
  * Devuelve datos de una empresa por id, validando acceso
+ */
+
+/**
+ * @swagger
+ * /api/empresas/{id}:
+ *   get:
+ *     summary: Obtener una empresa por ID
+ *     description: Retorna la información básica de una empresa según el ID indicado, validando el alcance del usuario autenticado.
+ *     tags:
+ *       - Empresas
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *           example: 1
+ *         description: ID de la empresa a consultar.
+ *     responses:
+ *       200:
+ *         description: Empresa obtenida correctamente
+ *       400:
+ *         description: ID inválido
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         description: El usuario no tiene acceso a esta empresa
+ *       404:
+ *         description: Empresa no encontrada
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
  */
 router.get("/:id", requireAuth, async (req, res) => {
   try {

@@ -15,6 +15,39 @@ const loginSchema = z.object({
 });
 
 /* Ruta de Login al sistema */
+/**
+ * @swagger
+ * /api/auth/login:
+ *   post:
+ *     summary: Iniciar sesión
+ *     description: Autentica al usuario y devuelve un token JWT.
+ *     tags:
+ *       - Auth
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - usuario
+ *               - password
+ *             properties:
+ *               usuario:
+ *                 type: string
+ *                 example: admin
+ *               password:
+ *                 type: string
+ *                 example: "123456"
+ *     responses:
+ *       200:
+ *         description: Login correcto
+ *       401:
+ *         description: Credenciales inválidas
+ *       500:
+ *         description: Error interno del servidor
+ */
 router.post("/login", async (req, res) => {
   try {
     const body = loginSchema.parse(req.body);
@@ -130,6 +163,201 @@ router.post("/login", async (req, res) => {
 function uniqueSorted(values = []) {
   return [...new Set(values.filter(Boolean))].sort();
 }
+
+
+/**
+ * @swagger
+ * /api/auth/me:
+ *   get:
+ *     summary: Obtener sesión del usuario autenticado
+ *     description: >
+ *       Retorna la información del usuario autenticado, sus roles globales,
+ *       permisos globales, empresas asignadas, roles/permisos por empresa,
+ *       licencia activa de empresa y página inicial sugerida.
+ *     tags:
+ *       - Auth
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Sesión obtenida correctamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 ok:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     user:
+ *                       type: object
+ *                       properties:
+ *                         id:
+ *                           type: integer
+ *                           example: 1
+ *                         usuario:
+ *                           type: string
+ *                           example: admin
+ *                         nombreCompleto:
+ *                           type: string
+ *                           example: Administrador CSI Legal
+ *                         correo:
+ *                           type: string
+ *                           nullable: true
+ *                           example: admin@csilegal.com
+ *                         estado:
+ *                           type: integer
+ *                           example: 1
+ *                     rolesGlobales:
+ *                       type: array
+ *                       items:
+ *                         type: string
+ *                       example:
+ *                         - SUPER_ADMIN
+ *                     permisosGlobales:
+ *                       type: array
+ *                       items:
+ *                         type: string
+ *                       example:
+ *                         - USUARIOS_VER
+ *                         - USUARIOS_CREAR
+ *                         - ROLES_VER
+ *                     isGlobalAdmin:
+ *                       type: boolean
+ *                       example: true
+ *                     empresaActivaSugerida:
+ *                       type: object
+ *                       nullable: true
+ *                       properties:
+ *                         idEmpresa:
+ *                           type: integer
+ *                           example: 1
+ *                         nombre:
+ *                           type: string
+ *                           example: Empresa Demo S.A.
+ *                     empresas:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           idEmpresa:
+ *                             type: integer
+ *                             example: 1
+ *                           nombre:
+ *                             type: string
+ *                             example: Empresa Demo S.A.
+ *                           idPais:
+ *                             type: integer
+ *                             nullable: true
+ *                             example: 1
+ *                           pais:
+ *                             type: string
+ *                             nullable: true
+ *                             example: Honduras
+ *                           esPrincipal:
+ *                             type: boolean
+ *                             example: true
+ *                           licencia:
+ *                             type: object
+ *                             nullable: true
+ *                             properties:
+ *                               id:
+ *                                 type: integer
+ *                                 example: 10
+ *                               fechaInicio:
+ *                                 type: string
+ *                                 format: date
+ *                                 example: "2026-01-01"
+ *                               fechaFin:
+ *                                 type: string
+ *                                 format: date
+ *                                 example: "2026-12-31"
+ *                               estado:
+ *                                 type: integer
+ *                                 example: 1
+ *                               tipoLicencia:
+ *                                 type: string
+ *                                 nullable: true
+ *                                 example: ANUAL
+ *                               maxUsuarios:
+ *                                 type: integer
+ *                                 nullable: true
+ *                                 example: 10
+ *                           roles:
+ *                             type: array
+ *                             items:
+ *                               type: string
+ *                             example:
+ *                               - EMPRESA_ADMIN
+ *                           permisos:
+ *                             type: array
+ *                             items:
+ *                               type: string
+ *                             example:
+ *                               - EVALUACIONES_VER
+ *                               - EVALUACIONES_EDITAR
+ *                     landingPage:
+ *                       type: string
+ *                       example: /paises
+ *       401:
+ *         description: Token no enviado, inválido o expirado
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 ok:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Token no enviado o inválido
+ *       403:
+ *         description: Licencia vencida o no disponible para la empresa del usuario
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 ok:
+ *                   type: boolean
+ *                   example: false
+ *                 code:
+ *                   type: string
+ *                   example: LICENSE_EXPIRED
+ *                 message:
+ *                   type: string
+ *                   example: La licencia de la empresa ha vencido. Para continuar usando CSI Legal, debe renovar su licencia.
+ *       404:
+ *         description: Usuario no encontrado o inactivo
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 ok:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Usuario no encontrado o inactivo
+ *       500:
+ *         description: Error interno al obtener sesión
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 ok:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Error interno al obtener sesión
+ */
 
 router.get("/me", requireAuth, async (req, res) => {
   try {
