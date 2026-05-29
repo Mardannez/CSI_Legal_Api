@@ -5,6 +5,38 @@ import { requireAuth } from "../middlewares/auth.middleware.js";
 const router = Router();
 
 /**
+ * @swagger
+ * tags:
+ *   - name: Subcategorias
+ *     description: Catalogo de subcategorias
+ */
+
+/**
+ * @swagger
+ * /api/subcategorias/options:
+ *   get:
+ *     summary: Listar opciones de subcategorias
+ *     tags: [Subcategorias]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: categoriaId
+ *         required: false
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Subcategorias consultadas
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
+
+/**
  * GET /api/subcategorias/options?categoriaId=2
  * Devuelve opciones con Label = "Categoria / SubCategoria"
  * Basado en la view public."vw_SubCategoriaOptions"

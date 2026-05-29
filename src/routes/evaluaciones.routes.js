@@ -853,7 +853,7 @@ router.post(
 
         const { data: requisitos, error: reqErr } = await supabase
           .from("Requisito")
-          .select("id, IdPeriocidad")
+          .select("id, IdPeriocidad, EstadoRequisito")
           .in("id", ids);
 
         if (reqErr) {
@@ -864,10 +864,10 @@ router.post(
           });
         }
 
-        reqList = requisitos || [];
+        const requisitosSafe = requisitos || [];
 
-        if (reqList.length !== ids.length) {
-          const found = new Set(reqList.map((r) => r.id));
+        if (requisitosSafe.length !== ids.length) {
+          const found = new Set(requisitosSafe.map((r) => r.id));
           const missing = ids.filter((id) => !found.has(id));
 
           return res.status(400).json({
@@ -875,10 +875,21 @@ router.post(
             missingIds: missing,
           });
         }
+
+        reqList = requisitosSafe.filter(
+          (r) => (r.EstadoRequisito || "").toString().trim() === "Vigente"
+        );
+
+        if (reqList.length === 0) {
+          return res.status(400).json({
+            message: "No hay requisitos vigentes para iniciar evaluaciÃ³n",
+          });
+        }
       } else {
         const { data: requisitos, error: reqErr } = await supabase
           .from("Requisito")
           .select("id, IdPeriocidad")
+          .eq("EstadoRequisito", "Vigente")
           .order("id", { ascending: true });
 
         if (reqErr) {

@@ -5,6 +5,13 @@ import { authorizeGlobalPermission } from "../middlewares/authorizeGlobalPermiss
 
 const router = Router();
 
+/**
+ * @swagger
+ * tags:
+ *   - name: Roles
+ *     description: Mantenimiento de roles y permisos asignados
+ */
+
 const ESTADO_ACTIVO = 1;
 const ESTADO_INACTIVO = 0;
 
@@ -67,6 +74,51 @@ async function getPermisosMapByIds(idsPermiso) {
 
   return Object.fromEntries((data || []).map((row) => [Number(row.IdPermiso), row]));
 }
+
+/**
+ * @swagger
+ * /api/roles:
+ *   get:
+ *     summary: Listar roles
+ *     tags: [Roles]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         required: false
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: pageSize
+ *         required: false
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: q
+ *         required: false
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: estado
+ *         required: false
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: ambito
+ *         required: false
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Roles consultados
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 
 /**
  * GET /api/roles
@@ -138,6 +190,35 @@ router.get(
 );
 
 /**
+ * @swagger
+ * /api/roles/{id}:
+ *   get:
+ *     summary: Obtener rol por id
+ *     tags: [Roles]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Rol consultado
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
+
+/**
  * GET /api/roles/:id
  */
 router.get(
@@ -168,6 +249,29 @@ router.get(
     }
   }
 );
+
+/**
+ * @swagger
+ * /api/roles:
+ *   post:
+ *     summary: Crear rol
+ *     tags: [Roles]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       201:
+ *         description: Rol creado
+ *       400:
+ *         description: Datos invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       409:
+ *         description: Rol duplicado
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 
 /**
  * POST /api/roles
@@ -250,6 +354,37 @@ router.post(
     }
   }
 );
+
+/**
+ * @swagger
+ * /api/roles/{id}:
+ *   put:
+ *     summary: Actualizar rol
+ *     tags: [Roles]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Rol actualizado
+ *       400:
+ *         description: Parametros o datos invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       409:
+ *         description: Rol duplicado
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 
 /**
  * PUT /api/roles/:id
@@ -342,6 +477,35 @@ router.put(
 );
 
 /**
+ * @swagger
+ * /api/roles/{id}:
+ *   delete:
+ *     summary: Inactivar rol
+ *     tags: [Roles]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Rol inactivado
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
+
+/**
  * DELETE /api/roles/:id
  * Inactiva rol
  */
@@ -390,6 +554,35 @@ router.delete(
     }
   }
 );
+
+/**
+ * @swagger
+ * /api/roles/{id}/permisos:
+ *   get:
+ *     summary: Listar permisos asignados a un rol
+ *     tags: [Roles]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Permisos del rol consultados
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 
 /**
  * GET /api/roles/:id/permisos
@@ -443,6 +636,35 @@ router.get(
     }
   }
 );
+
+/**
+ * @swagger
+ * /api/roles/{id}/permisos:
+ *   post:
+ *     summary: Asignar permiso a rol
+ *     tags: [Roles]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       201:
+ *         description: Permiso asignado al rol
+ *       400:
+ *         description: Parametros o datos invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 
 /**
  * POST /api/roles/:id/permisos
@@ -548,6 +770,40 @@ router.post(
     }
   }
 );
+
+/**
+ * @swagger
+ * /api/roles/{id}/rol-permisos/{idRolPermiso}:
+ *   delete:
+ *     summary: Inactivar permiso asignado a rol
+ *     tags: [Roles]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: path
+ *         name: idRolPermiso
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Permiso del rol inactivado
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 
 /**
  * DELETE /api/roles/:id/rol-permisos/:idRolPermiso
