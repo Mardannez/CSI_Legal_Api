@@ -97,7 +97,7 @@ async function getEmpresaViewById(idEmpresa) {
  * @swagger
  * /api/empresas:
  *   get:
- *     summary: Obtener listado de empresas disponibles
+ *     summary: Obtener listado de empresas disponibles que se registran en el sistema
  *     description: Retorna las empresas disponibles para el usuario autenticado. Puede filtrarse por país mediante paisId.
  *     tags:
  *       - Empresas
@@ -185,7 +185,7 @@ router.get("/", requireAuth, async (req, res) => {
  * @swagger
  * /api/empresas/{id}:
  *   get:
- *     summary: Obtener una empresa por ID
+ *     summary: Seleccionar una empresa por ID
  *     description: Retorna la información básica de una empresa según el ID indicado, validando el alcance del usuario autenticado.
  *     tags:
  *       - Empresas
