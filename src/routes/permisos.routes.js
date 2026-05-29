@@ -5,6 +5,13 @@ import { authorizeGlobalPermission } from "../middlewares/authorizeGlobalPermiss
 
 const router = Router();
 
+/**
+ * @swagger
+ * tags:
+ *   - name: Permisos
+ *     description: Mantenimiento de permisos
+ */
+
 const ESTADO_ACTIVO = 1;
 const ESTADO_INACTIVO = 0;
 
@@ -41,6 +48,51 @@ async function getPermisoById(idPermiso) {
   if (error) throw error;
   return data;
 }
+
+/**
+ * @swagger
+ * /api/permisos:
+ *   get:
+ *     summary: Listar permisos
+ *     tags: [Permisos]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         required: false
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: pageSize
+ *         required: false
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: q
+ *         required: false
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: estado
+ *         required: false
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: modulo
+ *         required: false
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Permisos consultados
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 
 /**
  * GET /api/permisos
@@ -111,6 +163,35 @@ router.get(
 );
 
 /**
+ * @swagger
+ * /api/permisos/{id}:
+ *   get:
+ *     summary: Obtener permiso por id
+ *     tags: [Permisos]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Permiso consultado
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
+
+/**
  * GET /api/permisos/:id
  */
 router.get(
@@ -141,6 +222,29 @@ router.get(
     }
   }
 );
+
+/**
+ * @swagger
+ * /api/permisos:
+ *   post:
+ *     summary: Crear permiso
+ *     tags: [Permisos]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       201:
+ *         description: Permiso creado
+ *       400:
+ *         description: Datos invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       409:
+ *         description: Permiso duplicado
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 
 /**
  * POST /api/permisos
@@ -221,6 +325,37 @@ router.post(
     }
   }
 );
+
+/**
+ * @swagger
+ * /api/permisos/{id}:
+ *   put:
+ *     summary: Actualizar permiso
+ *     tags: [Permisos]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Permiso actualizado
+ *       400:
+ *         description: Parametros o datos invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       409:
+ *         description: Permiso duplicado
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 
 /**
  * PUT /api/permisos/:id
@@ -305,6 +440,35 @@ router.put(
     }
   }
 );
+
+/**
+ * @swagger
+ * /api/permisos/{id}:
+ *   delete:
+ *     summary: Inactivar permiso
+ *     tags: [Permisos]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Permiso inactivado
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 
 /**
  * DELETE /api/permisos/:id

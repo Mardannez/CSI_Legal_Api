@@ -6,6 +6,13 @@ import { authorizeGlobalPermission } from "../middlewares/authorizeGlobalPermiss
 
 const router = Router();
 
+/**
+ * @swagger
+ * tags:
+ *   - name: Usuarios
+ *     description: Mantenimiento de usuarios, empresas y roles asignados
+ */
+
 const ESTADO_ACTIVO = 1;
 const ESTADO_INACTIVO = 0;
 const SALT_ROUNDS = 10;
@@ -292,6 +299,25 @@ async function getLicenciasMapByEmpresaIds(idsEmpresa) {
 
 
 /**
+ * @swagger
+ * /api/usuarios/catalogos:
+ *   get:
+ *     summary: Obtener catalogos para usuarios
+ *     tags: [Usuarios]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Catalogos consultados
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
+
+/**
  * ============================================================
  * GET /api/usuarios/catalogos
  * Devuelve empresas y roles disponibles para poblar combos
@@ -343,6 +369,46 @@ router.get(
     }
   }
 );
+
+/**
+ * @swagger
+ * /api/usuarios:
+ *   get:
+ *     summary: Listar usuarios
+ *     tags: [Usuarios]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         required: false
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: pageSize
+ *         required: false
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: q
+ *         required: false
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: estado
+ *         required: false
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Usuarios consultados
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 
 /**
  * ============================================================
@@ -483,6 +549,35 @@ router.get(
 );
 
 /**
+ * @swagger
+ * /api/usuarios/{id}/empresas:
+ *   get:
+ *     summary: Listar empresas asignadas a usuario
+ *     tags: [Usuarios]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Empresas del usuario consultadas
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
+
+/**
  * ============================================================
  * GET /api/usuarios/:id/empresas
  * Lista empresas asignadas a un usuario
@@ -542,6 +637,35 @@ router.get(
     }
   }
 );
+
+/**
+ * @swagger
+ * /api/usuarios/{id}/empresas:
+ *   post:
+ *     summary: Asignar empresa a usuario
+ *     tags: [Usuarios]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       201:
+ *         description: Empresa asignada
+ *       400:
+ *         description: Parametros o datos invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 
 /**
  * ============================================================
@@ -665,6 +789,40 @@ router.post(
 );
 
 /**
+ * @swagger
+ * /api/usuarios/{id}/empresas/{usuarioEmpresaId}:
+ *   put:
+ *     summary: Actualizar empresa asignada a usuario
+ *     tags: [Usuarios]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: path
+ *         name: usuarioEmpresaId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Empresa del usuario actualizada
+ *       400:
+ *         description: Parametros o datos invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
+
+/**
  * ============================================================
  * PUT /api/usuarios/:id/empresas/:usuarioEmpresaId
  * Edita relación usuario-empresa
@@ -736,6 +894,40 @@ router.put(
 );
 
 /**
+ * @swagger
+ * /api/usuarios/{id}/empresas/{usuarioEmpresaId}:
+ *   delete:
+ *     summary: Inactivar empresa asignada a usuario
+ *     tags: [Usuarios]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: path
+ *         name: usuarioEmpresaId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Empresa del usuario inactivada
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
+
+/**
  * ============================================================
  * DELETE /api/usuarios/:id/empresas/:usuarioEmpresaId
  * Inactiva relación usuario-empresa y sus roles empresa
@@ -799,6 +991,40 @@ router.delete(
 );
 
 /**
+ * @swagger
+ * /api/usuarios/{id}/empresas/{usuarioEmpresaId}/roles:
+ *   get:
+ *     summary: Listar roles por empresa del usuario
+ *     tags: [Usuarios]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: path
+ *         name: usuarioEmpresaId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Roles por empresa consultados
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
+
+/**
  * ============================================================
  * GET /api/usuarios/:id/empresas/:usuarioEmpresaId/roles
  * Lista roles por empresa asignados a esa relación
@@ -853,6 +1079,40 @@ router.get(
     }
   }
 );
+
+/**
+ * @swagger
+ * /api/usuarios/{id}/empresas/{usuarioEmpresaId}/roles:
+ *   post:
+ *     summary: Asignar rol por empresa al usuario
+ *     tags: [Usuarios]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: path
+ *         name: usuarioEmpresaId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       201:
+ *         description: Rol por empresa asignado
+ *       400:
+ *         description: Parametros o datos invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 
 /**
  * ============================================================
@@ -970,6 +1230,47 @@ router.post(
 );
 
 /**
+ * @swagger
+ * /api/usuarios/{id}/empresas/{usuarioEmpresaId}/roles/{usuarioEmpresaRolId}:
+ *   put:
+ *     summary: Actualizar rol por empresa del usuario
+ *     tags: [Usuarios]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: path
+ *         name: usuarioEmpresaId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: path
+ *         name: usuarioEmpresaRolId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Rol por empresa actualizado
+ *       400:
+ *         description: Parametros o datos invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       409:
+ *         description: Rol duplicado
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
+
+/**
  * ============================================================
  * PUT /api/usuarios/:id/empresas/:usuarioEmpresaId/roles/:usuarioEmpresaRolId
  * Edita relación de rol empresa
@@ -1078,6 +1379,45 @@ router.put(
 );
 
 /**
+ * @swagger
+ * /api/usuarios/{id}/empresas/{usuarioEmpresaId}/roles/{usuarioEmpresaRolId}:
+ *   delete:
+ *     summary: Inactivar rol por empresa del usuario
+ *     tags: [Usuarios]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: path
+ *         name: usuarioEmpresaId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: path
+ *         name: usuarioEmpresaRolId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Rol por empresa inactivado
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
+
+/**
  * ============================================================
  * DELETE /api/usuarios/:id/empresas/:usuarioEmpresaId/roles/:usuarioEmpresaRolId
  * Inactiva relación rol empresa
@@ -1145,6 +1485,35 @@ router.delete(
 );
 
 /**
+ * @swagger
+ * /api/usuarios/{id}/roles-global:
+ *   get:
+ *     summary: Listar roles globales del usuario
+ *     tags: [Usuarios]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Roles globales consultados
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
+
+/**
  * ============================================================
  * GET /api/usuarios/:id/roles-global
  * Lista roles globales del usuario
@@ -1204,6 +1573,35 @@ router.get(
     }
   }
 );
+
+/**
+ * @swagger
+ * /api/usuarios/{id}/roles-global:
+ *   post:
+ *     summary: Asignar rol global a usuario
+ *     tags: [Usuarios]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       201:
+ *         description: Rol global asignado
+ *       400:
+ *         description: Parametros o datos invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 
 /**
  * ============================================================
@@ -1320,6 +1718,42 @@ router.post(
 );
 
 /**
+ * @swagger
+ * /api/usuarios/{id}/roles-global/{usuarioRolGlobalId}:
+ *   put:
+ *     summary: Actualizar rol global del usuario
+ *     tags: [Usuarios]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: path
+ *         name: usuarioRolGlobalId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Rol global actualizado
+ *       400:
+ *         description: Parametros o datos invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       409:
+ *         description: Rol duplicado
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
+
+/**
  * ============================================================
  * PUT /api/usuarios/:id/roles-global/:usuarioRolGlobalId
  * Edita relación rol global
@@ -1423,6 +1857,40 @@ router.put(
 );
 
 /**
+ * @swagger
+ * /api/usuarios/{id}/roles-global/{usuarioRolGlobalId}:
+ *   delete:
+ *     summary: Inactivar rol global del usuario
+ *     tags: [Usuarios]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: path
+ *         name: usuarioRolGlobalId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Rol global inactivado
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
+
+/**
  * ============================================================
  * DELETE /api/usuarios/:id/roles-global/:usuarioRolGlobalId
  * Inactiva rol global de usuario
@@ -1481,6 +1949,35 @@ router.delete(
     }
   }
 );
+
+/**
+ * @swagger
+ * /api/usuarios/{id}:
+ *   get:
+ *     summary: Obtener detalle de usuario
+ *     tags: [Usuarios]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Usuario consultado
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 
 /**
  * ============================================================
@@ -1564,6 +2061,29 @@ router.get(
     }
   }
 );
+
+/**
+ * @swagger
+ * /api/usuarios:
+ *   post:
+ *     summary: Crear usuario
+ *     tags: [Usuarios]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       201:
+ *         description: Usuario creado
+ *       400:
+ *         description: Datos invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       409:
+ *         description: Usuario duplicado
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 
 /**
  * ============================================================
@@ -1670,6 +2190,37 @@ router.post(
     }
   }
 );
+
+/**
+ * @swagger
+ * /api/usuarios/{id}:
+ *   put:
+ *     summary: Actualizar usuario
+ *     tags: [Usuarios]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Usuario actualizado
+ *       400:
+ *         description: Parametros o datos invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       409:
+ *         description: Usuario duplicado
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 
 /**
  * ============================================================
@@ -1792,6 +2343,35 @@ router.put(
     }
   }
 );
+
+/**
+ * @swagger
+ * /api/usuarios/{id}:
+ *   delete:
+ *     summary: Inactivar usuario
+ *     tags: [Usuarios]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Usuario inactivado
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
 
 /**
  * ============================================================
