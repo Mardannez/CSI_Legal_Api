@@ -3,7 +3,12 @@ import swaggerJSDoc from 'swagger-jsdoc';
 const PORT = process.env.PORT || 4000;
 const API_PUBLIC_URL =
   process.env.API_PUBLIC_URL ||
-  (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : `http://localhost:${PORT}`);
+  process.env.NEXT_PUBLIC_API_URL ||
+  (process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+    : process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : `http://localhost:${PORT}`);
 
 const swaggerOptions = {
   definition: {
