@@ -1,5 +1,5 @@
 import { Router } from "express";
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
 import { supabase } from "../lib/supabase.js";
@@ -10,7 +10,7 @@ import {getActiveLicensesByEmpresaIds, buildLicenseMap,} from "../helpers/licenc
 const router = Router();
 
 const loginSchema = z.object({
-  usuario: z.string().min(3),
+  usuario: z.string().trim().min(3),
   password: z.string().min(4),
 });
 
@@ -51,15 +51,38 @@ const loginSchema = z.object({
 router.post("/login", async (req, res) => {
   try {
     const body = loginSchema.parse(req.body);
+    const loginDebug = process.env.LOGIN_DEBUG === "true" || process.env.NODE_ENV !== "production";
 
     const { data: user, error } = await supabase
       .from("Usuarios")
-      .select("id, Usuario, Password, Estado")
+      .select('id, "Usuario", "Password", "Estado"')
       .eq("Usuario", body.usuario)
-      .single();
+      .maybeSingle();
 
-    if (error || !user) {
+    if (error) {
+      console.error("Login user lookup error:", error.message);
       return res.status(401).json({ message: "Credenciales inválidas" });
+    }
+
+    if (!user) {
+      if (loginDebug) {
+        console.log("Login diagnostic:", {
+          usuario: body.usuario,
+          userFound: false,
+        });
+      }
+
+      return res.status(401).json({ message: "Credenciales inválidas" });
+    }
+
+    if (loginDebug) {
+      console.log("Login diagnostic:", {
+        usuario: body.usuario,
+        userFound: true,
+        estado: user.Estado,
+        hasPasswordHash: Boolean(user.Password),
+        passwordHashType: user.Password?.startsWith("$2") ? "bcrypt" : "unknown",
+      });
     }
 
     if (user.Estado !== 1) {
@@ -67,6 +90,13 @@ router.post("/login", async (req, res) => {
     }
 
     const ok = await bcrypt.compare(body.password, user.Password);
+    if (loginDebug) {
+      console.log("Login password diagnostic:", {
+        usuario: body.usuario,
+        passwordOk: ok,
+      });
+    }
+
     if (!ok) {
       return res.status(401).json({ message: "Credenciales inválidas" });
     }
@@ -140,7 +170,7 @@ router.post("/login", async (req, res) => {
           isGlobalAdmin,
         },
         process.env.JWT_SECRET,
-        { expiresIn: process.env.JWT_EXPIRES_IN || "1h" }
+        { expiresIn: process.env.JWT_EXPIRES_IN || "8h" }
       );
 
     return res.json({
@@ -162,6 +192,124 @@ router.post("/login", async (req, res) => {
 
 function uniqueSorted(values = []) {
   return [...new Set(values.filter(Boolean))].sort();
+}
+
+async function getActiveGlobalPermissionCodes(userId) {
+  const { data: usuarioRoles, error: usuarioRolesError } = await supabase
+    .from("UsuarioRolGlobal")
+    .select('"IdRol"')
+    .eq("IdUsuario", userId)
+    .eq("Estado", 1);
+
+  if (usuarioRolesError) throw usuarioRolesError;
+
+  const roleIds = uniqueSorted((usuarioRoles || []).map((row) => Number(row.IdRol)));
+  if (roleIds.length === 0) return [];
+
+  const { data: roles, error: rolesError } = await supabase
+    .from("Roles")
+    .select('"IdRol"')
+    .in("IdRol", roleIds)
+    .eq("Estado", 1);
+
+  if (rolesError) throw rolesError;
+
+  const activeRoleIds = uniqueSorted((roles || []).map((row) => Number(row.IdRol)));
+  if (activeRoleIds.length === 0) return [];
+
+  return getActivePermissionCodesByRoleIds(activeRoleIds);
+}
+
+async function getActiveEmpresaPermissionRows(userId) {
+  const { data: usuarioEmpresas, error: usuarioEmpresasError } = await supabase
+    .from("UsuarioEmpresa")
+    .select('"IdUsuarioEmpresa", "IdEmpresa"')
+    .eq("IdUsuario", userId)
+    .eq("Estado", 1);
+
+  if (usuarioEmpresasError) throw usuarioEmpresasError;
+
+  const usuarioEmpresaById = new Map(
+    (usuarioEmpresas || []).map((row) => [
+      Number(row.IdUsuarioEmpresa),
+      Number(row.IdEmpresa),
+    ])
+  );
+  const usuarioEmpresaIds = [...usuarioEmpresaById.keys()];
+  if (usuarioEmpresaIds.length === 0) return [];
+
+  const { data: usuarioEmpresaRoles, error: usuarioEmpresaRolesError } = await supabase
+    .from("UsuarioEmpresaRol")
+    .select('"IdUsuarioEmpresa", "IdRol"')
+    .in("IdUsuarioEmpresa", usuarioEmpresaIds)
+    .eq("Estado", 1);
+
+  if (usuarioEmpresaRolesError) throw usuarioEmpresaRolesError;
+
+  const roleIds = uniqueSorted((usuarioEmpresaRoles || []).map((row) => Number(row.IdRol)));
+  if (roleIds.length === 0) return [];
+
+  const permissionsByRoleId = await getActivePermissionCodesMapByRoleIds(roleIds);
+
+  return (usuarioEmpresaRoles || []).flatMap((row) => {
+    const idEmpresa = usuarioEmpresaById.get(Number(row.IdUsuarioEmpresa));
+    const permisos = permissionsByRoleId.get(Number(row.IdRol)) || [];
+
+    return permisos.map((permissionCode) => ({
+      IdEmpresa: idEmpresa,
+      PermisoCodigo: permissionCode,
+    }));
+  });
+}
+
+async function getActivePermissionCodesByRoleIds(roleIds = []) {
+  const map = await getActivePermissionCodesMapByRoleIds(roleIds);
+  return uniqueSorted([...map.values()].flat());
+}
+
+async function getActivePermissionCodesMapByRoleIds(roleIds = []) {
+  const uniqueRoleIds = uniqueSorted(roleIds.map(Number).filter(Boolean));
+  const result = new Map(uniqueRoleIds.map((roleId) => [roleId, []]));
+
+  if (uniqueRoleIds.length === 0) return result;
+
+  const { data: rolPermisos, error: rolPermisosError } = await supabase
+    .from("RolPermiso")
+    .select('"IdRol", "IdPermiso"')
+    .in("IdRol", uniqueRoleIds)
+    .eq("Estado", 1);
+
+  if (rolPermisosError) throw rolPermisosError;
+
+  const permisoIds = uniqueSorted((rolPermisos || []).map((row) => Number(row.IdPermiso)));
+  if (permisoIds.length === 0) return result;
+
+  const { data: permisos, error: permisosError } = await supabase
+    .from("Permisos")
+    .select('"IdPermiso", "Codigo"')
+    .in("IdPermiso", permisoIds)
+    .eq("Estado", 1);
+
+  if (permisosError) throw permisosError;
+
+  const permisosMap = new Map(
+    (permisos || []).map((row) => [Number(row.IdPermiso), row.Codigo])
+  );
+
+  for (const row of rolPermisos || []) {
+    const roleId = Number(row.IdRol);
+    const permissionCode = permisosMap.get(Number(row.IdPermiso));
+
+    if (permissionCode) {
+      result.get(roleId)?.push(permissionCode);
+    }
+  }
+
+  for (const [roleId, permissionCodes] of result.entries()) {
+    result.set(roleId, uniqueSorted(permissionCodes));
+  }
+
+  return result;
 }
 
 
@@ -366,11 +514,11 @@ router.get("/me", requireAuth, async (req, res) => {
     const [
       userResult,
       globalRolesResult,
-      globalPermsResult,
       isGlobalAdminResult,
       usuarioEmpresaResult,
       empresaRolesResult,
-      empresaPermsResult,
+      activeGlobalPermsResult,
+      activeEmpresaPermsResult,
     ] = await Promise.all([
       supabase
         .from("Usuarios")
@@ -382,11 +530,6 @@ router.get("/me", requireAuth, async (req, res) => {
       supabase
         .from("vw_UsuarioRolesGlobales")
         .select("RolCodigo")
-        .eq("IdUsuario", userId),
-
-      supabase
-        .from("vw_UsuarioPermisosGlobales")
-        .select("PermisoCodigo")
         .eq("IdUsuario", userId),
 
       supabase.rpc("fn_es_admin_global", {
@@ -404,19 +547,16 @@ router.get("/me", requireAuth, async (req, res) => {
         .select("IdEmpresa, RolCodigo")
         .eq("IdUsuario", userId),
 
-      supabase
-        .from("vw_UsuarioPermisosEmpresa")
-        .select("IdEmpresa, PermisoCodigo")
-        .eq("IdUsuario", userId),
+      getActiveGlobalPermissionCodes(userId),
+
+      getActiveEmpresaPermissionRows(userId),
     ]);
 
     if (userResult.error) throw userResult.error;
     if (globalRolesResult.error) throw globalRolesResult.error;
-    if (globalPermsResult.error) throw globalPermsResult.error;
     if (isGlobalAdminResult.error) throw isGlobalAdminResult.error;
     if (usuarioEmpresaResult.error) throw usuarioEmpresaResult.error;
     if (empresaRolesResult.error) throw empresaRolesResult.error;
-    if (empresaPermsResult.error) throw empresaPermsResult.error;
 
     const user = userResult.data;
 
@@ -431,9 +571,7 @@ router.get("/me", requireAuth, async (req, res) => {
       (globalRolesResult.data || []).map((x) => x.RolCodigo)
     );
 
-    const permisosGlobales = uniqueSorted(
-      (globalPermsResult.data || []).map((x) => x.PermisoCodigo)
-    );
+    const permisosGlobales = activeGlobalPermsResult;
 
     const isGlobalAdmin = isGlobalAdminResult.data === true;
 
@@ -484,7 +622,7 @@ router.get("/me", requireAuth, async (req, res) => {
     );
 
     const empresaRoles = empresaRolesResult.data || [];
-    const empresaPermisos = empresaPermsResult.data || [];
+    const empresaPermisos = activeEmpresaPermsResult;
 
 
       // ==========================================================

@@ -4,6 +4,14 @@ import { requireAuth } from "../middlewares/auth.middleware.js";
 import { authorizeEmpresaAccess } from "../middlewares/authorizeEmpresaAcces.middleware.js";
 import multer from 'multer';
 import { requireActiveEmpresaLicense } from "../middlewares/licencia.middleware.js";
+import { setInlinePdfHeaders } from "../helpers/pdf-response.helper.js";
+import {
+  createAuditoriaEvidencia,
+  createAuditoriaEstadoRequisito,
+  createAuditoriaEvento,
+  createAuditoriaRequisito,
+  createAuditoriaResponsable,
+} from "./auditoriaevaluacion.routes.js";
 
 
 const router = Router();
@@ -1384,6 +1392,19 @@ router.put(
         });
       }
 
+      const { data: estadoAnteriorRow, error: estadoAnteriorErr } = await supabase
+        .from("EstadoRequisito")
+        .select('id, "Estado"')
+        .eq("id", detalle.IdEstadoRequisito)
+        .maybeSingle();
+
+      if (estadoAnteriorErr) {
+        return res.status(500).json({
+          message: "Error consultando estado anterior del requisito",
+          detail: estadoAnteriorErr.message,
+        });
+      }
+
       const { data: encabezado, error: encErr } = await supabase
         .from("EvaluacionEncabezado")
         .select('id, "Estado"')
@@ -1423,10 +1444,19 @@ router.put(
         });
       }
 
+      const auditoriaEstado = await createAuditoriaEstadoRequisito({
+        detalleId,
+        idUsuario: req.user?.id,
+        idEstadoNuevo: newEstadoId,
+        estadoAnterior: estadoAnteriorRow?.Estado || "No definido",
+        estadoNuevo: estadoRow.Estado,
+      });
+
       return res.json({
         message: "Estado actualizado",
         Detalle: updated,
         Estado: estadoRow,
+        AuditoriaEstado: auditoriaEstado,
       });
     } catch (err) {
       console.error(err);
@@ -1641,9 +1671,24 @@ router.post(
         });
       }
 
+      const auditorias = await Promise.all(
+        (data || []).map((evidencia) =>
+          createAuditoriaEvidencia({
+            idEvidencia: evidencia.id,
+            detalleId,
+            idUsuario: req.user?.id,
+            descripcionEvidencia: `Se agrego evidencia: ${evidencia.Nombre}.${
+              evidencia.Descripcion ? ` ${evidencia.Descripcion}` : ""
+            }`,
+            fechaEvidencia: normalizeDateOnly(evidencia.FechaRegistro),
+          })
+        )
+      );
+
       return res.status(201).json({
         message: "Evidencia(s) cargada(s) correctamente",
         Evidencias: data || [],
+        AuditoriaEvidencias: auditorias,
       });
     } catch (error) {
       console.error("POST /detalle/:detalleId/evidencias error:", error);
@@ -1755,11 +1800,15 @@ router.get(
       const finalFileName =
         originalName || `${fallbackBaseName}.${ext}`;
 
-      res.setHeader("Content-Type", mime);
-      res.setHeader(
-        "Content-Disposition",
-        `attachment; filename="${finalFileName}"`
-      );
+      if (mime === "application/pdf") {
+        setInlinePdfHeaders(res, finalFileName.replace(/\.pdf$/i, ""));
+      } else {
+        res.setHeader("Content-Type", mime);
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="${finalFileName}"`
+        );
+      }
 
       return res.send(fileBuffer);
     } catch (error) {
@@ -1824,6 +1873,33 @@ router.delete(
         });
       }
 
+      const { data: evidenciaActual, error: evidenciaActualError } = await supabase
+        .from("Evidencias")
+        .select("id, IdEvaluacionDetalle, Nombre, Descripcion, FechaRegistro, NombreArchivoOriginal")
+        .eq("id", id)
+        .maybeSingle();
+
+      if (evidenciaActualError) {
+        return res.status(500).json({
+          message: "Error consultando evidencia",
+          detail: evidenciaActualError.message,
+        });
+      }
+
+      if (!evidenciaActual) {
+        return res.status(404).json({
+          message: "Evidencia no encontrada",
+        });
+      }
+
+      const auditoria = await createAuditoriaEvidencia({
+        idEvidencia: evidenciaActual.id,
+        detalleId: evidenciaActual.IdEvaluacionDetalle,
+        idUsuario: req.user?.id,
+        descripcionEvidencia: `Se elimino evidencia: ${evidenciaActual.Nombre || `Evidencia #${id}`}.`,
+        fechaEvidencia: normalizeDateOnly(evidenciaActual.FechaRegistro),
+      });
+
       const { data, error } = await supabase
         .from("Evidencias")
         .delete()
@@ -1847,6 +1923,7 @@ router.delete(
       return res.json({
         message: "Evidencia eliminada correctamente",
         Evidencia: data,
+        AuditoriaEvidencia: auditoria,
       });
     } catch (error) {
       console.error("DELETE /evidencias/:id error:", error);
@@ -2110,6 +2187,14 @@ router.post(
         });
       }
 
+      const auditoriaEvento = await createAuditoriaEvento({
+        idEvento: eventoCreado.id,
+        detalleId,
+        idUsuario: req.user?.id,
+        observacion: `Se agrego evento.${comentario ? ` ${comentario}` : ""}`,
+        fechaEvento: normalizeDateOnly(eventoCreado.FechaRegistro),
+      });
+
       return res.status(201).json({
         message: "Evento guardado correctamente",
         Evento: {
@@ -2119,6 +2204,7 @@ router.post(
             Nombre: evidencia.Nombre,
           },
         },
+        AuditoriaEvento: auditoriaEvento,
       });
     } catch (error) {
       console.error("POST /detalle/:detalleId/eventos error:", error);
@@ -2454,12 +2540,20 @@ router.post(
         });
       }
 
+      const auditoriaResponsable = await createAuditoriaResponsable({
+        idResponsableRequisito: relacion.id,
+        detalleId,
+        idUsuario: req.user?.id,
+        observaciones: "Registro de Responsable para el requisito.",
+      });
+
       return res.status(201).json({
         message: "Responsable asignado correctamente",
         ResponsableAsignado: {
           ...relacion,
           Responsable: responsable,
         },
+        AuditoriaResponsable: auditoriaResponsable,
       });
     } catch (error) {
       console.error("POST /detalle/:detalleId/responsables error:", error);
@@ -2853,12 +2947,20 @@ router.post(
         });
       }
 
+      const auditoriaResponsable = await createAuditoriaResponsable({
+        idResponsableRequisito: relacion.id,
+        detalleId,
+        idUsuario: req.user?.id,
+        observaciones: "Registro de Responsable para el requisito.",
+      });
+
       return res.status(201).json({
         message: "Responsable creado y asignado correctamente",
         ResponsableAsignado: {
           ...relacion,
           Responsable: responsable,
         },
+        AuditoriaResponsable: auditoriaResponsable,
       });
     } catch (error) {
       console.error("POST /detalle/:detalleId/responsables/nuevo error:", error);
@@ -2941,9 +3043,17 @@ router.delete(
         });
       }
 
+      const auditoriaResponsable = await createAuditoriaResponsable({
+        idResponsableRequisito: data.id,
+        detalleId: data.IdEvaluacionDetalle,
+        idUsuario: req.user?.id,
+        observaciones: "Eliminacion de responsable para el Requisito.",
+      });
+
       return res.json({
         message: "Responsable desasignado correctamente",
         ResponsableAsignado: data,
+        AuditoriaResponsable: auditoriaResponsable,
       });
     } catch (error) {
       console.error("DELETE /requisito-responsables/:id error:", error);
@@ -3238,11 +3348,20 @@ router.put(
         });
       }
 
+      const auditoria = await createAuditoriaRequisito({
+        detalleId,
+        idUsuario: req.user?.id,
+        responsable,
+        fechaPlanificada,
+        idPeriocidad,
+      });
+
       const informacion = await buildDetalleInformacionResponse(updated);
 
       return res.json({
         message: "Información actualizada correctamente",
         Informacion: informacion,
+        Auditoria: auditoria,
       });
     } catch (error) {
       console.error("PUT /detalle/:detalleId/informacion error:", error);

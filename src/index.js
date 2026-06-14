@@ -18,6 +18,7 @@ import usuariosRoutes from "./routes/usuarios.routes.js";
 import rolesRoutes from "./routes/roles.routes.js";
 import permisosRoutes from "./routes/permisos.routes.js";
 import licenciasRoutes from "./routes/licencias.routes.js";
+import auditoriaEvaluacionRoutes from "./routes/auditoriaevaluacion.routes.js";
 import swaggerUi from 'swagger-ui-express';
 import swaggerSpec from '../config/swagger.js';
 
@@ -87,6 +88,7 @@ app.use("/api/usuarios", usuariosRoutes);
 app.use("/api/roles", rolesRoutes);
 app.use("/api/permisos", permisosRoutes);
 app.use("/api/licencias", licenciasRoutes);
+app.use("/api/Auditoriaevaluacion", auditoriaEvaluacionRoutes);
 
 
 const port = process.env.PORT || 4000;
