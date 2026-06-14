@@ -2,6 +2,7 @@ import { Router } from "express";
 import { supabase } from "../lib/supabase.js";
 import { requireAuth } from "../middlewares/auth.middleware.js";
 import { authorizeGlobalPermission } from "../middlewares/authorizeGlobalPermission.middleware.js";
+import { setInlinePdfHeaders } from "../helpers/pdf-response.helper.js";
 import multer from 'multer';
 
 const router = Router();
@@ -70,6 +71,89 @@ function toInt(v) {
   const n = Number(v);
   return Number.isInteger(n) ? n : null;
 }
+
+async function userHasGlobalPermission(userId, permissionCode) {
+  const { data, error } = await supabase.rpc("fn_usuario_tiene_permiso_global", {
+    p_id_usuario: userId,
+    p_codigo_permiso: permissionCode,
+  });
+
+  if (error) throw error;
+  return data === true;
+}
+
+async function userHasAnyEmpresaPermission(userId, permissionCodes = []) {
+  const { data: empresas, error: empresasError } = await supabase
+    .from("UsuarioEmpresa")
+    .select('"IdEmpresa"')
+    .eq("IdUsuario", userId)
+    .eq("Estado", 1);
+
+  if (empresasError) throw empresasError;
+
+  const empresaIds = [
+    ...new Set((empresas || []).map((row) => Number(row.IdEmpresa)).filter(Boolean)),
+  ];
+
+  for (const empresaId of empresaIds) {
+    for (const permissionCode of permissionCodes) {
+      const { data, error } = await supabase.rpc("fn_usuario_tiene_permiso_empresa", {
+        p_id_usuario: userId,
+        p_id_empresa: empresaId,
+        p_codigo_permiso: permissionCode,
+      });
+
+      if (error) throw error;
+      if (data === true) return true;
+    }
+  }
+
+  return false;
+}
+
+function authorizeReferenciaLegalRead() {
+  return async (req, res, next) => {
+    try {
+      const userId = req.user?.id;
+
+      if (!userId) {
+        return res.status(401).json({
+          ok: false,
+          message: "No autenticado",
+        });
+      }
+
+      const hasGlobalRead = await userHasGlobalPermission(
+        userId,
+        "REQUISITOS_MANTENIMIENTO_VER"
+      );
+
+      if (hasGlobalRead) return next();
+
+      const hasEmpresaRead = await userHasAnyEmpresaPermission(userId, [
+        "EVALUACIONES_VER",
+        "CATALOGOS_VER",
+        "DASHBOARD_VER",
+      ]);
+
+      if (hasEmpresaRead) return next();
+
+      return res.status(403).json({
+        ok: false,
+        message: "No tienes permisos suficientes para consultar referencias legales",
+      });
+    } catch (error) {
+      console.error("authorizeReferenciaLegalRead error:", error);
+
+      return res.status(500).json({
+        ok: false,
+        message: "Error interno validando permisos de lectura",
+      });
+    }
+  };
+}
+
+const authorizeReferenciaLegalReadAccess = authorizeReferenciaLegalRead();
 
 /**
  * GET /api/requisitos-mantenimiento?countryId=&estado=&q=&page=&pageSize=
@@ -636,7 +720,7 @@ router.post('/referencias-legales/:idReferenciaLegal/leyes', requireAuth,authori
  *       500:
  *         $ref: '#/components/responses/InternalServerError'
  */
-router.get('/referencias-legales/:idReferenciaLegal/leyes',requireAuth,authorizeGlobalPermission(['REQUISITOS_MANTENIMIENTO_VER']),
+router.get('/referencias-legales/:idReferenciaLegal/leyes',requireAuth,authorizeReferenciaLegalReadAccess,
   async (req, res) => {
     try {
       const idReferenciaLegal = Number(req.params.idReferenciaLegal);
@@ -707,7 +791,7 @@ router.get('/referencias-legales/:idReferenciaLegal/leyes',requireAuth,authorize
  *       500:
  *         $ref: '#/components/responses/InternalServerError'
  */
-router.get('/leyes/:id/download',requireAuth,authorizeGlobalPermission(['REQUISITOS_MANTENIMIENTO_VER']),
+router.get('/leyes/:id/download',requireAuth,authorizeReferenciaLegalReadAccess,
   async (req, res) => {
     try {
       const id = Number(req.params.id);
@@ -739,13 +823,7 @@ router.get('/leyes/:id/download',requireAuth,authorizeGlobalPermission(['REQUISI
 
       const fileBuffer = postgresByteaToBuffer(ley.Documento);
 
-      const safeName = `${ley.NombreLey || 'documento'}`.replace(/[^\w\-]+/g, '_');
-
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader(
-        'Content-Disposition',
-        `inline; filename="${safeName}.pdf"`
-      );
+      setInlinePdfHeaders(res, ley.NombreLey);
 
       return res.send(fileBuffer);
     } catch (error) {
@@ -986,7 +1064,7 @@ router.post('/requisitos/:idRequisito/referencias-legales',requireAuth,authorize
  *       500:
  *         $ref: '#/components/responses/InternalServerError'
  */
-router.get('/requisitos/:idRequisito/referencias-legales',requireAuth,authorizeGlobalPermission(['REQUISITOS_MANTENIMIENTO_VER']),
+router.get('/requisitos/:idRequisito/referencias-legales',requireAuth,authorizeReferenciaLegalReadAccess,
   async (req, res) => {
     try {
       const idRequisito = toInt(req.params.idRequisito);
@@ -1056,7 +1134,7 @@ router.get('/requisitos/:idRequisito/referencias-legales',requireAuth,authorizeG
  *       500:
  *         $ref: '#/components/responses/InternalServerError'
  */
-router.get('/referencias-legales/:id',requireAuth,authorizeGlobalPermission(['REQUISITOS_MANTENIMIENTO_VER']), async (req, res) => {
+router.get('/referencias-legales/:id',requireAuth,authorizeReferenciaLegalReadAccess, async (req, res) => {
     try {
       const id = toInt(req.params.id);
 

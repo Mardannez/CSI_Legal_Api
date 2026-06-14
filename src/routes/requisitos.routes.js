@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { supabase } from "../lib/supabase.js";
 import { requireAuth } from "../middlewares/auth.middleware.js";
+import { setInlinePdfHeaders } from "../helpers/pdf-response.helper.js";
 
 const router = Router();
 
@@ -329,10 +330,7 @@ router.get("/leyes/:id/download", requireAuth, async (req, res) => {
     }
 
     const fileBuffer = postgresByteaToBuffer(ley.Documento);
-    const safeName = `${ley.NombreLey || "documento"}`.replace(/[^\w-]+/g, "_");
-
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `inline; filename="${safeName}.pdf"`);
+    setInlinePdfHeaders(res, ley.NombreLey);
 
     return res.send(fileBuffer);
   } catch (error) {

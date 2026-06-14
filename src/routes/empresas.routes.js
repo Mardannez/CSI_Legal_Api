@@ -89,6 +89,130 @@ async function getEmpresaViewById(idEmpresa) {
   return data || null;
 }
 
+async function getCumplimientoByEmpresaIds(empresaIds = []) {
+  const ids = [...new Set(empresaIds.map((id) => Number(id)).filter(Boolean))];
+  const empty = new Map(
+    ids.map((id) => [
+      id,
+      {
+        totalRequisitos: 0,
+        requisitosCumplidos: 0,
+        porcentajeCumplimiento: 0,
+      },
+    ])
+  );
+
+  if (ids.length === 0) return empty;
+
+  const { data: cumplidoEstado, error: cumplidoError } = await supabase
+    .from("EstadoRequisito")
+    .select('id, "Estado"')
+    .eq("Estado", "Cumplido")
+    .maybeSingle();
+
+  if (cumplidoError) throw cumplidoError;
+
+  const cumplidoEstadoId = Number(cumplidoEstado?.id) || null;
+
+  const { data: evaluaciones, error: evaluacionesError } = await supabase
+    .from("EvaluacionEncabezado")
+    .select('id, "IdEmpresa", "Estado", "FechaRegistro"')
+    .in("IdEmpresa", ids)
+    .order("FechaRegistro", { ascending: false });
+
+  if (evaluacionesError) throw evaluacionesError;
+
+  const evaluacionByEmpresa = new Map();
+
+  for (const evaluacion of evaluaciones || []) {
+    const empresaId = Number(evaluacion.IdEmpresa);
+    const current = evaluacionByEmpresa.get(empresaId);
+
+    if (!current) {
+      evaluacionByEmpresa.set(empresaId, evaluacion);
+      continue;
+    }
+
+    if (Number(current.Estado) !== 1 && Number(evaluacion.Estado) === 1) {
+      evaluacionByEmpresa.set(empresaId, evaluacion);
+    }
+  }
+
+  const evaluacionIds = [...evaluacionByEmpresa.values()]
+    .map((evaluacion) => Number(evaluacion.id))
+    .filter(Boolean);
+
+  if (evaluacionIds.length === 0) return empty;
+
+  const { data: detalles, error: detallesError } = await supabase
+    .from("EvaluacionDetalle")
+    .select('id, "IdEvaluacionEncabezado", "IdEstadoRequisito"')
+    .in("IdEvaluacionEncabezado", evaluacionIds);
+
+  if (detallesError) throw detallesError;
+
+  const empresaByEvaluacionId = new Map(
+    [...evaluacionByEmpresa.entries()].map(([empresaId, evaluacion]) => [
+      Number(evaluacion.id),
+      empresaId,
+    ])
+  );
+
+  const result = new Map(empty);
+
+  for (const detalle of detalles || []) {
+    const empresaId = empresaByEvaluacionId.get(Number(detalle.IdEvaluacionEncabezado));
+    if (!empresaId) continue;
+
+    const current = result.get(empresaId) || {
+      totalRequisitos: 0,
+      requisitosCumplidos: 0,
+      porcentajeCumplimiento: 0,
+    };
+
+    current.totalRequisitos += 1;
+
+    if (cumplidoEstadoId && Number(detalle.IdEstadoRequisito) === cumplidoEstadoId) {
+      current.requisitosCumplidos += 1;
+    }
+
+    result.set(empresaId, current);
+  }
+
+  for (const [empresaId, metric] of result.entries()) {
+    metric.porcentajeCumplimiento =
+      metric.totalRequisitos > 0
+        ? Math.round((metric.requisitosCumplidos / metric.totalRequisitos) * 100)
+        : 0;
+
+    result.set(empresaId, metric);
+  }
+
+  return result;
+}
+
+function enrichEmpresaWithCumplimiento(empresa, cumplimientoMap) {
+  const empresaId = Number(empresa.IdEmpresa ?? empresa.id);
+  const cumplimiento = cumplimientoMap.get(empresaId) || {
+    totalRequisitos: 0,
+    requisitosCumplidos: 0,
+    porcentajeCumplimiento: 0,
+  };
+
+  return {
+    ...empresa,
+    Cumplimiento: cumplimiento.porcentajeCumplimiento,
+    PorcentajeCumplimiento: cumplimiento.porcentajeCumplimiento,
+    RequisitosCumplidos: cumplimiento.requisitosCumplidos,
+    TotalRequisitosEvaluados: cumplimiento.totalRequisitos,
+    Compliance: {
+      totalRequirements: cumplimiento.totalRequisitos,
+      completedRequirements: cumplimiento.requisitosCumplidos,
+      percentage: cumplimiento.porcentajeCumplimiento,
+    },
+  };
+}
+
 /**
  * GET /api/empresas?paisId=1
  * Devuelve empresas visibles para el usuario logueado
@@ -169,9 +293,117 @@ router.get("/", requireAuth, async (req, res) => {
       });
     }
 
-    return res.json({ Empresas: data || [] });
+    const empresas = data || [];
+    const cumplimientoMap = await getCumplimientoByEmpresaIds(
+      empresas.map((empresa) => empresa.IdEmpresa ?? empresa.id)
+    );
+
+    return res.json({
+      Empresas: empresas.map((empresa) =>
+        enrichEmpresaWithCumplimiento(empresa, cumplimientoMap)
+      ),
+    });
   } catch (err) {
     console.error("GET /api/empresas error:", err);
+    return res.status(500).json({ message: "Error interno" });
+  }
+});
+
+/**
+ * @swagger
+ * /api/empresas/cumplimiento:
+ *   get:
+ *     summary: Obtener cumplimiento por empresa
+ *     description: Retorna el porcentaje de requisitos cumplidos sobre el total asignado por empresa visible para el usuario.
+ *     tags:
+ *       - Empresas
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: paisId
+ *         required: false
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Cumplimiento consultado correctamente
+ *       400:
+ *         description: Parametros invalidos
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
+ */
+router.get("/cumplimiento", requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const scope = await getUserScope(userId);
+    const paisId = req.query.paisId !== undefined ? toInt(req.query.paisId) : null;
+
+    if (req.query.paisId !== undefined && (!paisId || paisId <= 0)) {
+      return res.status(400).json({
+        message: "paisId debe ser un entero positivo",
+      });
+    }
+
+    if (!scope.isGlobalAdmin && scope.empresaIds.length === 0) {
+      return res.json({ CumplimientoEmpresas: [] });
+    }
+
+    if (!scope.isGlobalAdmin && paisId && !scope.paisIds.includes(paisId)) {
+      return res.json({ CumplimientoEmpresas: [] });
+    }
+
+    let query = supabase
+      .from("vw_EmpresasPorPais")
+      .select("IdEmpresa, Empresa, IdPais, Pais")
+      .order("Empresa", { ascending: true });
+
+    if (paisId) {
+      query = query.eq("IdPais", paisId);
+    }
+
+    if (!scope.isGlobalAdmin) {
+      query = query.in("IdEmpresa", scope.empresaIds);
+    }
+
+    const { data: empresas, error } = await query;
+
+    if (error) {
+      return res.status(500).json({
+        message: "Error consultando empresas",
+        detail: error.message,
+      });
+    }
+
+    const empresasSafe = empresas || [];
+    const cumplimientoMap = await getCumplimientoByEmpresaIds(
+      empresasSafe.map((empresa) => empresa.IdEmpresa)
+    );
+
+    return res.json({
+      CumplimientoEmpresas: empresasSafe.map((empresa) => {
+        const cumplimiento = cumplimientoMap.get(Number(empresa.IdEmpresa)) || {
+          totalRequisitos: 0,
+          requisitosCumplidos: 0,
+          porcentajeCumplimiento: 0,
+        };
+
+        return {
+          IdEmpresa: Number(empresa.IdEmpresa),
+          Empresa: empresa.Empresa,
+          IdPais: empresa.IdPais ? Number(empresa.IdPais) : null,
+          Pais: empresa.Pais || null,
+          TotalRequisitos: cumplimiento.totalRequisitos,
+          RequisitosCumplidos: cumplimiento.requisitosCumplidos,
+          PorcentajeCumplimiento: cumplimiento.porcentajeCumplimiento,
+          Cumplimiento: cumplimiento.porcentajeCumplimiento,
+        };
+      }),
+    });
+  } catch (err) {
+    console.error("GET /api/empresas/cumplimiento error:", err);
     return res.status(500).json({ message: "Error interno" });
   }
 });
